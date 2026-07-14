@@ -4,3 +4,7 @@ INSIGHT-LIBRARY.md
 reference/
 evidence/
 .DS_Store
+
+# Internal only
+REQUIREMENTS-TRACEABILITY.md
+SHARE-NOTE.md
