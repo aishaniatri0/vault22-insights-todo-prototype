@@ -1,0 +1,19 @@
+<svg width="100" height="100" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background circle -->
+  <circle cx="50" cy="50" r="40" fill="#D9E2EC"/>
+
+  <!-- The "Circle" — a soft dashed ring binding the family together -->
+  <circle cx="50" cy="50" r="26" fill="none" stroke="#042B47" stroke-width="1.2" stroke-dasharray="2 3" opacity="0.5"/>
+
+  <!-- Owner figure (top, larger) -->
+  <circle cx="50" cy="36" r="8" fill="#01C38D" stroke="#042B47" stroke-width="1.4" stroke-linejoin="round"/>
+  <path d="M37 55 c 0 -7 6 -11 13 -11 c 7 0 13 4 13 11 v 2 h -26 z" fill="white" stroke="#042B47" stroke-width="1.4" stroke-linejoin="round"/>
+
+  <!-- Partner figure (bottom-left) -->
+  <circle cx="29" cy="50" r="6" fill="white" stroke="#042B47" stroke-width="1.4" stroke-linejoin="round"/>
+  <path d="M19 65 c 0 -5 5 -8 10 -8 c 5 0 10 3 10 8 v 2 h -20 z" fill="#01C38D" stroke="#042B47" stroke-width="1.4" stroke-linejoin="round"/>
+
+  <!-- Child figure (bottom-right) -->
+  <circle cx="71" cy="50" r="6" fill="white" stroke="#042B47" stroke-width="1.4" stroke-linejoin="round"/>
+  <path d="M61 65 c 0 -5 5 -8 10 -8 c 5 0 10 3 10 8 v 2 h -20 z" fill="#01C38D" stroke="#042B47" stroke-width="1.4" stroke-linejoin="round"/>
+</svg>

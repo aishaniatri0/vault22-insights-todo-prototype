@@ -1,0 +1,146 @@
+[
+ {
+  "href": "/app/dashboard/",
+  "label": "Home",
+  "icon": "/icons/menu/Home.png",
+  "alt": "home",
+  "inlineSvg": null,
+  "badge": null,
+  "sub": null
+ },
+ {
+  "href": "/app/transactions/",
+  "label": "Transactions",
+  "icon": "/icons/menu/Transactions.svg",
+  "alt": "transactions",
+  "inlineSvg": null,
+  "badge": null,
+  "sub": null
+ },
+ {
+  "href": "/app/budget/",
+  "label": "Budget",
+  "icon": "/icons/menu/Budget.png",
+  "alt": "budget",
+  "inlineSvg": null,
+  "badge": null,
+  "sub": null
+ },
+ {
+  "href": "/app/investments/",
+  "label": "Investments",
+  "icon": "/icons/menu/Investments.png",
+  "alt": "investments",
+  "inlineSvg": null,
+  "badge": null,
+  "sub": null
+ },
+ {
+  "href": "/app/portfolio/",
+  "label": "My Wealth",
+  "icon": "/icons/menu/MyWealth.svg",
+  "alt": "mywealth",
+  "inlineSvg": null,
+  "badge": null,
+  "sub": "Accounts"
+ },
+ {
+  "href": "/app/health-score/",
+  "label": "Financial Fitness",
+  "icon": "/icons/menu/FinancialFitness.svg",
+  "alt": "financial_fitness",
+  "inlineSvg": null,
+  "badge": null,
+  "sub": null
+ },
+ {
+  "href": "/app/goals/",
+  "label": "Goals",
+  "icon": "/icons/menu/Goals.svg",
+  "alt": "goals",
+  "inlineSvg": null,
+  "badge": null,
+  "sub": null
+ },
+ {
+  "href": "/app/family/",
+  "label": "Family Circle",
+  "icon": "/icons/menu/Family.svg",
+  "alt": "family",
+  "inlineSvg": null,
+  "badge": null,
+  "sub": null
+ },
+ {
+  "href": "/app/debt-management/",
+  "label": "Debt",
+  "icon": "/icons/menu/Goals.svg",
+  "alt": "goals",
+  "inlineSvg": null,
+  "badge": null,
+  "sub": null
+ },
+ {
+  "href": "/app/insurance/",
+  "label": "Insurance",
+  "icon": "/icons/menu/FinancialFitness.svg",
+  "alt": "insurance",
+  "inlineSvg": null,
+  "badge": null,
+  "sub": null
+ },
+ {
+  "href": "/app/crypto-news/",
+  "label": "Crypto Portfolio",
+  "icon": "/icons/menu/Crypto.svg",
+  "alt": "crypto",
+  "inlineSvg": null,
+  "badge": null,
+  "sub": null
+ },
+ {
+  "href": "/app/marketplace/",
+  "label": "Marketplace",
+  "icon": "/icons/menu/Marketplace.svg",
+  "alt": "marketplace",
+  "inlineSvg": null,
+  "badge": null,
+  "sub": null
+ },
+ {
+  "href": "/app/nudges/",
+  "label": "Insights",
+  "icon": "/icons/menu/insights.png",
+  "alt": "insights",
+  "inlineSvg": null,
+  "badge": null,
+  "sub": null
+ },
+ {
+  "href": "/app/product-updates/",
+  "label": "Product Updates",
+  "icon": "/icons/menu/Updates.png",
+  "alt": "updates",
+  "inlineSvg": null,
+  "badge": "New",
+  "sub": null
+ },
+ {
+  "href": null,
+  "label": "Tara AI",
+  "icon": "/images/tara-advisor.png",
+  "alt": "Tara",
+  "inlineSvg": null,
+  "badge": null,
+  "sub": null
+ },
+ {
+  "href": "/app/telegram-link/",
+  "label": "Connect Telegram",
+  "icon": null,
+  "alt": null,
+  "inlineSvg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"w-5 h-5\"><path d=\"M21.5 2 2 11l7 3 3 7L21.5 2Z\"></path><path d=\"m9 14 6.5-6.5\"></path></svg>",
+  "badge": "BETA",
+  "sub": null
+ }
+]

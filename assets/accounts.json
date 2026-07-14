@@ -1,0 +1,177 @@
+[
+ {
+  "name": "FNB Sample Credit Card Credit Card *2334CC",
+  "sub": "Credit Card \u2022\u2022c1a0",
+  "amt": "-$333.72"
+ },
+ {
+  "name": "Capitec Bank 1651287676",
+  "sub": "Bank \u2022\u20225967",
+  "amt": "$1,638.51"
+ },
+ {
+  "name": "Capitec Reward 1812091719",
+  "sub": "Reward \u2022\u20225968",
+  "amt": "$58.33"
+ },
+ {
+  "name": "Capitec Unit Trust 2013146694",
+  "sub": "UnitTrust \u2022\u202290a2",
+  "amt": "$40,389.45"
+ },
+ {
+  "name": "Capitec Bank 2255512862",
+  "sub": "Bank \u2022\u2022596a",
+  "amt": "$292.71"
+ },
+ {
+  "name": "Capitec Credit Card 6010712857",
+  "sub": "Credit Card \u2022\u2022596b",
+  "amt": "-$1,478.16"
+ },
+ {
+  "name": "ABSA Sample Site Home Loan *2334",
+  "sub": "Loan \u2022\u202259cd",
+  "amt": "-$60,675.83"
+ },
+ {
+  "name": "cash",
+  "sub": "Manual \u2022\u202271d2",
+  "amt": "-$81.26"
+ },
+ {
+  "name": "cash",
+  "sub": "Manual \u2022\u202271d8",
+  "amt": "$14.32"
+ },
+ {
+  "name": "home0701",
+  "sub": "Manual \u2022\u202271df",
+  "amt": "$161.88"
+ },
+ {
+  "name": "credit",
+  "sub": "Manual \u2022\u202271e4",
+  "amt": "-$5.82"
+ },
+ {
+  "name": "retire",
+  "sub": "Manual \u2022\u202271e9",
+  "amt": "$546.08"
+ },
+ {
+  "name": "taxi taxi",
+  "sub": "Manual \u2022\u202271ee",
+  "amt": "$3.63"
+ },
+ {
+  "name": "stocks",
+  "sub": "Manual \u2022\u2022357f",
+  "amt": "$2,000,000.00"
+ },
+ {
+  "name": "Primary Bank Account",
+  "sub": "Manual \u2022\u20221817",
+  "amt": "$57,839.47"
+ },
+ {
+  "name": "Investment Portfolio",
+  "sub": "Manual \u2022\u2022e0b0",
+  "amt": "$20,000.00"
+ },
+ {
+  "name": "FNB",
+  "sub": "Bank \u2022\u20224b06",
+  "amt": "$0.00"
+ },
+ {
+  "name": "Safe Steps(JSE)-Dev",
+  "sub": "Manual \u2022\u20222c5a",
+  "amt": "$77.84"
+ },
+ {
+  "name": "Safe Steps(JSE)-Dev",
+  "sub": "Manual \u2022\u20224511",
+  "amt": "$89.44"
+ },
+ {
+  "name": "Growth Gladiator(JSE)-Dev",
+  "sub": "Manual \u2022\u2022496d",
+  "amt": "$75.45"
+ },
+ {
+  "name": "Satrix Multi Asset Passive Portfolio Solutions Protect ETF",
+  "sub": "Manual \u2022\u2022abe8",
+  "amt": "$91.50"
+ },
+ {
+  "name": "Rocket Rider(JSE)-Dev",
+  "sub": "Manual \u2022\u20221a08",
+  "amt": "$163.19"
+ },
+ {
+  "name": "Balanced Buffett(JSE)-Dev",
+  "sub": "Manual \u2022\u20221a4a",
+  "amt": "$84.47"
+ },
+ {
+  "name": "Cautious Climber(JSE)-Dev",
+  "sub": "Manual \u2022\u20221ab9",
+  "amt": "$95.44"
+ },
+ {
+  "name": "Cautious Climber(JSE)-Dev",
+  "sub": "Manual \u2022\u20221abb",
+  "amt": "$1,345.63"
+ },
+ {
+  "name": "Satrix Multi Asset Passive Portfolio Solutions Protect ETF",
+  "sub": "Manual \u2022\u20229cea",
+  "amt": "$293.95"
+ },
+ {
+  "name": "Cautious Climber(JSE)-Dev",
+  "sub": "Manual \u2022\u2022d5f8",
+  "amt": "$78.47"
+ },
+ {
+  "name": "Cautious Climber(JSE)-Dev",
+  "sub": "Manual \u2022\u2022d8b2",
+  "amt": "$433.44"
+ },
+ {
+  "name": "Prescient Income Provider (PIP)Feeder AMETF",
+  "sub": "Manual \u2022\u20221d13",
+  "amt": "$0.00"
+ },
+ {
+  "name": "Safe Steps(JSE)-Dev",
+  "sub": "Manual \u2022\u20221d97",
+  "amt": "$0.00"
+ },
+ {
+  "name": "Safe Steps(JSE)-Dev",
+  "sub": "Manual \u2022\u2022b602",
+  "amt": "$6,186.24"
+ },
+ {
+  "name": "Cautious Climber(JSE)-Dev",
+  "sub": "Manual \u2022\u20224963",
+  "amt": "$163.30"
+ },
+ {
+  "name": "Ninety One Diversified Income Prescient Feeder Actively Managed ETF ",
+  "sub": "Manual \u2022\u2022c846",
+  "amt": "$63.07"
+ },
+ {
+  "name": "Prescient Income Provider (PIP)Feeder AMETF",
+  "sub": "Manual \u2022\u2022954e",
+  "amt": "$0.00"
+ },
+ {
+  "name": "Ninety One Diversified Income Prescient Feeder Actively Managed ETF ",
+  "sub": "Manual \u2022\u2022a900",
+  "amt": "$119.72"
+ }
+]
