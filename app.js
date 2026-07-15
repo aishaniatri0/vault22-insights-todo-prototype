@@ -10,6 +10,12 @@ const $ = s => document.querySelector(s);
 const el = (tag, cls, html) => { const n = document.createElement(tag); if (cls) n.className = cls; if (html != null) n.innerHTML = html; return n; };
 const money = n => 'R' + Math.round(Math.abs(n)).toLocaleString('en-ZA');
 
+/* Anything a user typed, or any string that reaches innerHTML, is escaped.
+   Without this, a to-do of "<img src=x onerror=...>" executes. */
+const esc = s => String(s == null ? '' : s)
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+
 /* The app's "today" is 14 Jul 2026, to match the data. */
 const NOW = new Date('2026-07-14T00:00:00');
 
@@ -189,9 +195,17 @@ function statusChip(i) {
   return '';
 }
 function actionChip(i) {
+  if (i.precursor) return `<span class="chip chip-ask">You answer</span>`;
   if (i.action === 'todo') return `<span class="chip chip-todo">To-do</span>`;
   if (i.action === 'wizard') return `<span class="chip chip-wizard">Wizard</span>`;
   return `<span class="chip chip-inapp">Tara does it</span>`;
+}
+
+/* The blockedBy note is written for us, with names in it ("Stephen: ..."). It is
+   never shown to a customer with the attribution attached. Strip the leading
+   "Name:" so the reason stands on its own. */
+function customerBlockedReason(s) {
+  return String(s || '').replace(/^\s*[A-Z][a-z]+(?:\s[A-Z][a-z]+)?:\s*/, '');
 }
 
 function insightCard(i) {
@@ -214,15 +228,15 @@ function insightCard(i) {
 
   card.innerHTML = `
     <div class="ins-top">
-      <span class="ins-mod">${mod ? mod.label : i.module}</span>
+      <span class="ins-mod">${esc(mod ? mod.label : i.module)}</span>
       ${actionChip(i)} ${statusChip(i)}
     </div>
-    <h3>${i.title}</h3>
-    <p class="ins-body">${i.body}</p>
+    <h3>${esc(i.title)}</h3>
+    <p class="ins-body">${esc(i.body)}</p>
     <details class="ins-ev">
       <summary>What Tara read</summary>
-      <p class="ev-reads"><strong>Reads:</strong> ${i.reads}</p>
-      <p class="ev-data">${i.evidence}</p>
+      <p class="ev-reads"><strong>Reads:</strong> ${esc(i.reads)}</p>
+      <p class="ev-data">${esc(i.evidence)}</p>
     </details>
     <div class="ins-cta">
       ${cta}
@@ -240,10 +254,10 @@ function wireCards(root) {
   root.querySelectorAll('[data-why]').forEach(b => b.onclick = () => {
     const i = State.insights.find(x => x.id === b.dataset.why);
     openDrawer('Why this is blocked', `
-      <p class="dr-lead">${i.title}</p>
+      <p class="dr-lead">${esc(i.title)}</p>
       <div class="dr-block">
         <h4>What it needs before it can ship</h4>
-        <p>${i.blockedBy}</p>
+        <p>${esc(customerBlockedReason(i.blockedBy))}</p>
       </div>
       <div class="dr-block">
         <h4>What it would read</h4>
@@ -420,11 +434,15 @@ function openWizard(which) {
     $('#wz-save').onclick = () => {
       const pcts = [...$('#modal-bd').querySelectorAll('.wz-chip.on')].map(c => +c.dataset.pct);
       const custom = +$('#wz-custom').value;
-      if (custom > 0 && custom <= 100) pcts.push(custom);
+      if (custom > 0 && custom <= 100 && !pcts.includes(custom)) pcts.push(custom);
       const cats = [...$('#modal-bd').querySelectorAll('[data-cat]:checked')].map(c => c.dataset.cat);
-      cats.forEach(id => { const c = DATA.budget.find(x => x.id === id); if (c) c.alerts = pcts.sort((a, b) => a - b); });
+      // An alert with no threshold is not an alert. Refuse to save an empty one.
+      if (!pcts.length) { toast('Pick at least one threshold to alert at'); return; }
+      if (!cats.length) { toast('Pick at least one category'); return; }
+      const sorted = pcts.sort((a, b) => a - b);
+      cats.forEach(id => { const c = DATA.budget.find(x => x.id === id); if (c) c.alerts = sorted.slice(); });
       closeModal();
-      toast(`Alerts on for ${cats.length} categories at ${pcts.sort((a, b) => a - b).join(', ')}%`);
+      toast(`Alerts on for ${cats.length} categor${cats.length > 1 ? 'ies' : 'y'} at ${sorted.join(', ')}%`);
       refresh(); render();
     };
   }
@@ -444,9 +462,13 @@ function openWizard(which) {
       <button class="btn btn-primary btn-block" id="wz-save2">Save these budgets</button>`);
     $('#wz-save2').onclick = () => {
       const rows = [...$('#modal-bd').querySelectorAll('[data-bud]')];
-      rows.forEach(r => { const c = DATA.budget.find(x => x.id === r.dataset.bud); if (c) c.budget = +r.value; });
+      // A blank or negative budget is not a budget. Clamp before saving so no
+      // category can end up as RNaN or a negative number.
+      const bad = rows.filter(r => r.value === '' || isNaN(+r.value) || +r.value < 0);
+      if (bad.length) { toast('Enter a budget of zero or more for every category'); bad[0].focus(); return; }
+      rows.forEach(r => { const c = DATA.budget.find(x => x.id === r.dataset.bud); if (c) c.budget = Math.round(+r.value); });
       closeModal();
-      toast(`${rows.length} budgets updated`);
+      toast(`${rows.length} budget${rows.length > 1 ? 's' : ''} updated`);
       refresh(); render();
     };
   }
@@ -455,7 +477,12 @@ function openWizard(which) {
 /* ---------------- Tara ---------------- */
 function openTara() {
   const open = Store.open();
-  const live = State.insights.filter(i => i.status !== 'blocked');
+  const all = State.insights;                               // same basis as the Insights page
+  const live = all.filter(i => i.status !== 'blocked');
+  const needYou = live.filter(i => i.action === 'todo').length;
+  const taraCan = live.filter(i => i.action !== 'todo').length;
+  const blocked = all.length - live.length;
+  const oldest = open.length ? esc(open[open.length - 1].text) : '';
   openDrawer('Tara', `
     <div class="tara-hd">
       <img src="assets/img/tara-advisor.png" alt="">
@@ -467,11 +494,11 @@ function openTara() {
     <p class="dr-lead">I have read your ${DATA.accounts.length} accounts, ${DATA.tx.length} transactions this month, ${DATA.debts.length} debts and ${DATA.insurance.policies.length} policies.</p>
     <div class="dr-block">
       <h4>What I found</h4>
-      <p>${live.length} things worth your attention. ${live.filter(i => i.action === 'todo').length} of them need you to do something off platform, so they belong on your to-do list. ${live.filter(i => i.action === 'in-app' || i.action === 'wizard').length} I can handle here.</p>
+      <p>${all.length} things worth your attention. ${needYou} need you to do something off platform, so they belong on your to-do list. ${taraCan} I can handle here${blocked ? `, and ${blocked} are still waiting on rails we do not have yet` : ''}.</p>
     </div>
     <div class="dr-block">
       <h4>Your list</h4>
-      <p>${open.length ? `${open.length} open item${open.length > 1 ? 's' : ''}. Oldest: "${open[open.length - 1].text}"` : 'Nothing on it yet.'}</p>
+      <p>${open.length ? `${open.length} open item${open.length > 1 ? 's' : ''}. Oldest: "${oldest}"` : 'Nothing on it yet.'}</p>
     </div>
     <a class="btn btn-primary btn-block" href="#/insights" onclick="closeDrawer()">See all insights</a>
     <p class="dr-note">I show you options and I never give financial advice.</p>`);
@@ -492,11 +519,19 @@ function viewInsights() {
     : State.filter === 'tara' ? rest.filter(i => i.action !== 'todo')
     : rest.filter(i => i.module === State.filter);
 
+  /* One consistent basis for every count on this page and in Tara.
+     total = everything firing. needYou = actionable off-platform (todo AND not
+     blocked, so it has a real Add button). taraCan = on-platform AND not blocked.
+     blocked = shaped but not actionable. needYou + taraCan + blocked = total. */
+  const total = State.insights.length;
+  const needYou = live.filter(i => i.action === 'todo').length;
+  const taraCan = live.filter(i => i.action !== 'todo').length;
+
   v.innerHTML = `
     <div class="page-head">
       <h1>Insights</h1>
     </div>
-    <p class="page-sub">${live.length} insights from your real data. ${blocked.length} more are shaped but waiting on rails.</p>
+    <p class="page-sub">${total} insights from your real data. ${needYou} need you, ${taraCan} Tara can handle, ${blocked.length} waiting on rails.</p>
 
     <section class="best">
       <div class="best-hd">
@@ -514,11 +549,11 @@ function viewInsights() {
 
     <div class="ins-summary">
       <div class="sum">
-        <span class="sum-n">${State.insights.filter(i => i.action === 'todo').length}</span>
+        <span class="sum-n">${needYou}</span>
         <span class="sum-l">need you<em>they go to your to-do list</em></span>
       </div>
       <div class="sum">
-        <span class="sum-n">${State.insights.filter(i => i.action !== 'todo').length}</span>
+        <span class="sum-n">${taraCan}</span>
         <span class="sum-l">Tara can do<em>handled on platform</em></span>
       </div>
       <div class="sum">
@@ -528,11 +563,11 @@ function viewInsights() {
     </div>
 
     <div class="filters" id="filters">
-      <button class="f ${State.filter === 'all' ? 'on' : ''}" data-f="all">All ${State.insights.length}</button>
+      <button class="f ${State.filter === 'all' ? 'on' : ''}" data-f="all">All ${total}</button>
       <button class="f ${State.filter === 'todo' ? 'on' : ''}" data-f="todo">To-do</button>
       <button class="f ${State.filter === 'tara' ? 'on' : ''}" data-f="tara">Tara does it</button>
       ${MODULES.filter(m => State.insights.some(i => i.module === m.id))
-        .map(m => `<button class="f ${State.filter === m.id ? 'on' : ''}" data-f="${m.id}">${m.label}</button>`).join('')}
+        .map(m => `<button class="f ${State.filter === m.id ? 'on' : ''}" data-f="${esc(m.id)}">${esc(m.label)}</button>`).join('')}
     </div>
 
     <div class="ins-grid" id="grid"></div>`;
@@ -581,7 +616,15 @@ function viewTodo() {
         if (!rows.length) return '';
         return `<h4 class="todo-h ${bk.id === 'over' ? 'todo-h-over' : ''}">${bk.label} <span>${rows.length}</span></h4>
                 <div>${rows.map(todoRow).join('')}</div>`;
-      }).join('') : `
+      }).join('')
+      : done.length ? `
+        <div class="empty empty-slim">
+          <div class="empty-ic">✓</div>
+          <h3>All done</h3>
+          <p>You have cleared everything on your list. Nicely done.</p>
+          <a class="btn btn-primary" href="#/insights">See your insights</a>
+        </div>`
+      : `
         <div class="empty">
           <div class="empty-ic">✓</div>
           <h3>Nothing to do</h3>
@@ -596,7 +639,11 @@ function viewTodo() {
         </details>` : ''}
     </div>`;
 
-  $('#td-add').onclick = () => { Store.addManual($('#td-new').value); $('#td-new').value = ''; render(); };
+  $('#td-add').onclick = () => {
+    const val = $('#td-new').value;
+    if (!val.trim()) { toast('Type something to add first'); $('#td-new').focus(); return; }
+    Store.addManual(val); $('#td-new').value = ''; render();
+  };
   $('#td-new').onkeydown = e => { if (e.key === 'Enter') $('#td-add').click(); };
   wireTodo(v);
 }
@@ -610,12 +657,12 @@ function todoRow(t) {
         ${t.done ? '✓' : ''}
       </button>
       <div class="td-main">
-        <p class="td-text">${t.text}</p>
+        <p class="td-text">${esc(t.text)}</p>
         <p class="td-why">
-          ${mod ? `<span class="td-mod">${mod.label}</span>` : `<span class="td-mod td-mod-own">Added by you</span>`}
-          ${t.why ? t.why : ''}
+          ${mod ? `<span class="td-mod">${esc(mod.label)}</span>` : `<span class="td-mod td-mod-own">Added by you</span>`}
+          ${t.why ? esc(t.why) : ''}
         </p>
-        ${t.evidence ? `<details class="td-ev"><summary>Why this is here</summary><p>${t.evidence}</p></details>` : ''}
+        ${t.evidence ? `<details class="td-ev"><summary>Why this is here</summary><p>${esc(t.evidence)}</p></details>` : ''}
       </div>
       <label class="td-due ${due.cls}">
         <span>${due.text}</span>
@@ -706,10 +753,25 @@ MODULE_CHROME.debt = () => {
     </div>`;
 };
 
+/* Out-of-scope modules the live app has but this prototype does not build.
+   Without this they silently fell back to Insights, which reads as broken. */
+function viewPlaceholder(label) {
+  $('#view').innerHTML = `
+    <div class="page-head"><h1>${esc(label)}</h1></div>
+    <div class="empty">
+      <div class="empty-ic">🚧</div>
+      <h3>Not part of this prototype</h3>
+      <p>${esc(label)} lives in the live Vault22 app. This prototype covers Insights, the shared To-Do list, and the ten insight modules. Use the menu to get back to those.</p>
+      <a class="btn btn-primary" href="#/insights">Back to Insights</a>
+    </div>`;
+}
+
 /* ---------------- router ---------------- */
 const ROUTES = {
   '#/insights': { leaf: 'Insights', view: viewInsights },
   '#/todo': { leaf: 'To-Do', view: viewTodo },
+  '#/crypto': { leaf: 'Crypto Portfolio', view: () => viewPlaceholder('Crypto Portfolio') },
+  '#/updates': { leaf: 'Product Updates', view: () => viewPlaceholder('Product Updates') },
 };
 MODULES.forEach(m => { ROUTES['#/' + m.id] = { leaf: m.label, view: () => viewModule(m.id) }; });
 

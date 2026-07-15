@@ -982,3 +982,23 @@ input  { font-family: inherit; }
   .tara-fab img { width: 54px; height: 54px; }
   .ftr { flex-direction: column; gap: 12px; text-align: center; }
 }
+
+/* ============================================================
+   Adversarial-review fixes (14 Jul 2026).
+   ============================================================ */
+
+/* the precursor's own chip: the user answers, Tara does not */
+.chip-ask { background: #EEF2FF; color: #3730A3; }
+
+/* buttons must never inherit the global <a> underline */
+.btn, a.btn { text-decoration: none; }
+
+/* a long unbroken to-do string must not push the layout sideways */
+.td-text, .td-why, .ins h3, .ins-body, .ev-data { overflow-wrap: anywhere; word-break: break-word; }
+
+/* cards in a grid row must size to their own content, so expanding one card's
+   "What Tara read" no longer stretches its neighbours and floats their buttons */
+.ins-grid, .best-grid { align-items: start; }
+
+/* the compact "all done" state, when the open list is empty but Done has items */
+.empty-slim { padding: 32px 24px; }
