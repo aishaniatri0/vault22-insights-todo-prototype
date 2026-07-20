@@ -7,4 +7,7 @@ evidence/
 
 # Internal only
 REQUIREMENTS-TRACEABILITY.md
+REQUIREMENTS-TEST-MATRIX.md
 SHARE-NOTE.md
+FIX-PROMPT*.md
+gen-insight-library.py

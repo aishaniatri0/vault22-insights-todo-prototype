@@ -84,8 +84,8 @@ BUDGET.forEach(c => { c.sixMonthAverage = c.average; });
 /* Deliberately contains: a double charge, a refund miscounted as income, an internal
    transfer counted as spending, two forgotten subscriptions, and heavy bank fees. */
 const TX = [
-  { id: 't1', date: '2026-07-12', merchant: 'Netflix', amount: -199, group: 'Recurring', category: 'Subscriptions', recurring: true, lastUsed: '2026-02-01' },
-  { id: 't2', date: '2026-07-12', merchant: 'Showmax', amount: -99, group: 'Recurring', category: 'Subscriptions', recurring: true, lastUsed: '2025-11-14' },
+  { id: 't1', date: '2026-07-12', merchant: 'Netflix', amount: -199, group: 'Recurring', category: 'Subscriptions', recurring: true, lastUsed: '2026-02-01', seen: false },
+  { id: 't2', date: '2026-07-12', merchant: 'Showmax', amount: -99, group: 'Recurring', category: 'Subscriptions', recurring: true, lastUsed: '2025-11-14', seen: false },
   { id: 't3', date: '2026-07-11', merchant: 'Spotify', amount: -119, group: 'Recurring', category: 'Subscriptions', recurring: true, lastUsed: '2026-07-10' },
   { id: 't4', date: '2026-07-10', merchant: 'Adobe Creative Cloud', amount: -483, group: 'Recurring', category: 'Software & Services', recurring: true, lastUsed: '2025-12-02' },
   { id: 't5', date: '2026-07-09', merchant: 'Woolworths', amount: -1240, group: 'Day-to-day', category: 'Groceries' },
@@ -99,7 +99,7 @@ const TX = [
   { id: 't13', date: '2026-07-03', merchant: 'Salary', amount: 20000, group: 'Income', category: 'Salaries & Wages' },
   { id: 't14', date: '2026-07-02', merchant: 'Vida e Caffe', amount: -52, group: 'Day-to-day', category: 'Coffee' },
   { id: 't15', date: '2026-07-01', merchant: 'Sportsman Warehouse', amount: -2400, group: 'Day-to-day', category: 'Tech & Appliances', uncategorised: true },
-  { id: 't16', date: '2026-07-13', merchant: 'PAYFAST*UNKNOWN-MERCH', amount: -3750, group: 'Exceptions', category: 'General Purchases', firstTimeMerchant: true, farAboveTypical: true },
+  { id: 't16', date: '2026-07-13', merchant: 'PAYFAST*UNKNOWN-MERCH', amount: -3750, group: 'Exceptions', category: 'General Purchases', firstTimeMerchant: true, farAboveTypical: true, seen: false, pending: true },
 ];
 
 /* ---------------- goals (live) ---------------------------------------------------- */
@@ -135,7 +135,11 @@ const INVESTMENTS = {
     { name: 'Global Balanced Fund of Funds', value: 4844, fee: 0.85, target: 40 },
     { name: 'Vault22 SA Savings', value: 12603, fee: 0.45, target: 0 },
   ],
-  idleCash: 571979, // sitting in Absa Money Market
+  /* Cash that is genuinely doing nothing: the everyday transactional accounts,
+     which pay no interest. NOT the Absa Money Market (7.1%), which is already
+     working, and NOT the Standard Bank savings pot the accounts/marketplace
+     cards flag separately. Three different pots, so no double counting. */
+  idleCash: ACCOUNTS.filter(a => a.type === 'Bank' && a.active).reduce((s, a) => s + a.balance, 0),
 };
 
 /* ---------------- family circle --------------------------------------------------- */
@@ -157,10 +161,26 @@ const MARKETPLACE = {
   hasLoanSuppliers: false, // Stephen: "we don't have enough loan suppliers yet"
 };
 
+/* Net worth is DERIVED, not asserted. A hardcoded R35m against seven accounts
+   that sum to R1.2m is the kind of impossible number the engine exists to
+   avoid. The home loan implies a home, so the asset side carries a property
+   valued above the bond. Everything nets out to a figure the numbers support. */
+const PROPERTY_VALUE = 1850000; // the home the R1,047,000 bond is against
+const _assets = ACCOUNTS.reduce((s, a) => s + Math.max(0, a.balance), 0) + PROPERTY_VALUE;
+const _liabilities = ACCOUNTS.reduce((s, a) => s + Math.max(0, -a.balance), 0)
+  + DEBTS.reduce((s, x) => s + x.balance, 0);
+const NET_WORTH = _assets - _liabilities;
+
+/* The monthly change is tied to what actually moved: the investment book made
+   INVESTMENTS.profit, and new saving went in on top. fromInvestments can never
+   exceed the size of the investment book. */
+const NET_WORTH_CHANGE = { total: INVESTMENTS.profit + 3000, fromInvestments: INVESTMENTS.profit, fromSaving: 3000 };
+
 const DATA = {
   today: TODAY, groups: GROUPS, nws: NWS, classify,
-  profile: { name: 'ngandev0309', netWorth: 35255361, profileComplete: 97,
-    netWorthChange: { total: 2869820, fromInvestments: 2610400, fromSaving: 259420 } },
+  profile: { name: 'ngandev0309', netWorth: NET_WORTH, propertyValue: PROPERTY_VALUE,
+    assets: _assets, liabilities: _liabilities, profileComplete: 97,
+    netWorthChange: NET_WORTH_CHANGE },
   accounts: ACCOUNTS, debts: DEBTS, budget: BUDGET, income: INCOME, tx: TX,
   goals: GOALS, insurance: INSURANCE, fitness: FITNESS, investments: INVESTMENTS,
   family: FAMILY, marketplace: MARKETPLACE,

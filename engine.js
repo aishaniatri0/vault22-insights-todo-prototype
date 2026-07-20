@@ -30,7 +30,7 @@ const INSIGHTS = [
   /* ================= DEBT MANAGEMENT =================
      Stephen: "4 of these require the to-do list module". */
   {
-    id: 'debt-1', dueInDays: 17, priority: 3, module: 'debt', status: 'live', action: 'todo',
+    id: 'debt-1', dueInDays: 17, priority: 2, module: 'debt', status: 'live', action: 'todo',
     what: 'Pay off your most expensive debt first.',
     reads: 'Your debt balances and their interest rates.',
     test: d => {
@@ -105,7 +105,7 @@ const INSIGHTS = [
     },
   },
   {
-    id: 'debt-5', dueInDays: 17, priority: 2, module: 'debt', status: 'live', action: 'todo',
+    id: 'debt-5', dueInDays: 17, priority: 3, module: 'debt', status: 'live', action: 'todo',
     what: 'You are only paying the minimum.',
     reads: 'Your credit-card statements.',
     test: d => {
@@ -277,8 +277,7 @@ const INSIGHTS = [
     },
   },
   {
-    id: 'ins-3', dueInDays: 14, priority: 4, module: 'insurance', status: 'blocked', action: 'todo',
-    blockedBy: 'Needs a real insurance quote API. Stephen: research and suggest an insurance platform we can get quotes from.',
+    id: 'ins-3', dueInDays: 14, priority: 4, module: 'insurance', status: 'live', action: 'todo',
     what: 'Your premium went up.',
     reads: 'Your insurance payments over time.',
     test: d => {
@@ -427,12 +426,12 @@ const INSIGHTS = [
     reads: 'All your accounts.',
     test: d => {
       const c = d.profile.netWorthChange;
-      if (!c) return null;
+      if (!c || !c.total) return null;
       const pct = Math.round((c.fromInvestments / c.total) * 100);
       return {
         title: `Your net worth is up ${R(c.total)} this month`,
         body: `${pct}% of that came from your investments moving, not from money you put away. Markets give it and markets take it back.`,
-        evidence: `Net worth ${R(d.profile.netWorth)} across ${d.accounts.length} tracked accounts. Up ${R(c.total)}: ${R(c.fromInvestments)} from investments, ${R(c.fromSaving)} from saving.`,
+        evidence: `Net worth ${R(d.profile.netWorth)}: ${R(d.profile.assets)} in assets (${d.accounts.length} accounts and a ${R(d.profile.propertyValue)} home) less ${R(d.profile.liabilities)} owed. Up ${R(c.total)} this month: ${R(c.fromInvestments)} from investments, ${R(c.fromSaving)} from saving.`,
         inApp: 'Shows what caused the change, and lets you set a goal.',
         todo: null,
       };
@@ -475,12 +474,22 @@ const INSIGHTS = [
     reads: 'Your income, your regular bills and your balance.',
     test: d => {
       const committed = d.budget.filter(c => c.type === 'Need').reduce((s, c) => s + c.budget, 0);
-      const safe = d.income.expected - committed;
+      const debtService = d.debts.reduce((s, x) => s + x.actualPayment, 0);
+      const safe = d.income.expected - committed - debtService;
       const daysLeft = 17;
+      if (safe <= 0) {
+        return {
+          title: `There is nothing safe to spend this month`,
+          body: `Your Needs and debt repayments come to more than your income this month, so there is no free cash until that gap closes. Paying down debt is what frees it up.`,
+          evidence: `Income ${R(d.income.expected)}, committed Needs ${R(committed)}, debt repayments ${R(debtService)}. That is ${R(committed + debtService - d.income.expected)} more than you bring in.`,
+          inApp: 'Shows the shortfall, and where it is going.',
+          todo: null,
+        };
+      }
       return {
         title: `${R(Math.round(safe / daysLeft))} a day is safe to spend`,
-        body: `After your bills and what you have already spent, this is what is actually free between now and month end.`,
-        evidence: `Income ${R(d.income.expected)}, committed Needs ${R(committed)}, ${daysLeft} days left.`,
+        body: `After your bills, your debt repayments and what you have already spent, this is what is actually free between now and month end.`,
+        evidence: `Income ${R(d.income.expected)}, committed Needs ${R(committed)}, debt repayments ${R(debtService)}, ${daysLeft} days left.`,
         inApp: 'Shows the amount, and feeds the budget.',
         todo: null,
       };
@@ -761,9 +770,9 @@ const INSIGHTS = [
     test: d => {
       if (d.investments.idleCash < 50000) return null;
       return {
-        title: `${R(d.investments.idleCash)} is in cash, not invested`,
-        body: 'Cash is safe and it is shrinking. Some of this belongs somewhere it can grow.',
-        evidence: `${R(d.investments.idleCash)} in cash. ${R(d.investments.totalValue)} invested.`,
+        title: `${R(d.investments.idleCash)} is sitting in everyday accounts`,
+        body: 'Cash in a transactional account earns nothing while inflation eats it. Some of this belongs somewhere it can grow.',
+        evidence: `${R(d.investments.idleCash)} across your everyday accounts, earning no interest. ${R(d.investments.totalValue)} currently invested.`,
         inApp: 'Open an investment account.',
         todo: null,
       };
