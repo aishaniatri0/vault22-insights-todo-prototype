@@ -1195,3 +1195,70 @@ a.td-mod:hover { background: var(--green); color: #fff; }
   .td-controls { flex-wrap: wrap; justify-content: flex-end; }
 }
 .td-check-off { border-color: var(--g-200); background: var(--g-100); cursor: default; }
+
+/* ============================================================
+   Accessibility pass
+   ============================================================ */
+
+/* A visible focus indicator on everything that can take focus. The search box
+   set outline:none with no replacement, so keyboard users had no idea where they
+   were; the ring below is drawn against a light halo so it stays visible on both
+   white cards and the grey page. */
+:where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--g-900);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+.td-search:focus-within {
+  outline: 2px solid var(--g-900);
+  outline-offset: 2px;
+  border-radius: 10px;
+}
+
+/* Header chrome that displays state rather than doing something. Without this
+   these read as buttons and invited a click that never did anything. */
+.pill-static { cursor: default; }
+.pill-static:hover { box-shadow: none; }
+
+/* WCAG 2.2 target size (2.5.8): each of these measured under 24x24. The visual
+   size is unchanged; the hit area is padded out to meet the minimum. */
+.td-check, .td-icon, .td-x, .td-q-x {
+  min-width: 24px; min-height: 24px;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+
+/* Priority was encoded only as a 9px dot at 1.47:1 against white, which is not a
+   perceivable non-text indicator (1.4.11). Darkened, and given a ring so the
+   shape carries as well as the colour. */
+.td-pr { box-shadow: 0 0 0 1px rgba(0,0,0,.28); }
+.pr-lo { background: var(--g-400); }
+.pr-md { background: #B45309; }
+
+/* Card and control borders were --g-200 (1.24:1), so the boundaries of inputs and
+   cards were not perceivable. This lifts only the interactive ones. */
+.td-search, .todo-add input, .td-sel select { border-color: var(--g-300); }
+
+/* Respect a reduced-motion preference: the drawer, toast, hover lifts and every
+   other transition here are decorative. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .001ms !important;
+    scroll-behavior: auto !important;
+  }
+  .tara-fab:hover { transform: none; }
+}
+
+/* The sidebar becomes a horizontal strip on a phone, where only about three of
+   the sixteen destinations are visible at once. A fade on the right edge shows
+   there is more to scroll to rather than leaving it looking truncated. */
+@media (max-width: 900px) {
+  .side-nav-wrap { position: relative; }
+  #nav { scroll-snap-type: x proximity; }
+  #nav > a { scroll-snap-align: start; }
+}
+
+/* The badge is display:flex, which beats the hidden attribute's UA display:none.
+   Without this the "0" bubble stayed on screen when there was nothing to show. */
+.bell .badge[hidden] { display: none; }

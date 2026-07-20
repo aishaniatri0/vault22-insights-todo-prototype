@@ -43,11 +43,33 @@ const dayDiff = iso => Math.round((new Date(iso + 'T00:00:00') - NOW) / 86400000
 function dueLabel(iso) {
   if (!iso) return { text: 'No date', cls: 'due-none' };
   const n = dayDiff(iso);
-  if (n < 0) return { text: n === -1 ? 'Yesterday' : `${Math.abs(n)} days overdue`, cls: 'due-over' };
+  /* A date we cannot read must not silently become "NaN days overdue". */
+  if (!Number.isFinite(n)) return { text: 'No date', cls: 'due-none' };
+  if (n < 0) {
+    const over = Math.abs(n);
+    /* Past about a year, a day count stops being information ("46215 days
+       overdue"). Give the date instead. */
+    if (over > 365) return { text: `Overdue since ${longDate(iso)}`, cls: 'due-over' };
+    return { text: n === -1 ? 'Yesterday' : `${over} days overdue`, cls: 'due-over' };
+  }
   if (n === 0) return { text: 'Today', cls: 'due-now' };
   if (n === 1) return { text: 'Tomorrow', cls: 'due-now' };
   if (n <= 7) return { text: `In ${n} days`, cls: 'due-soon' };
-  return { text: new Date(iso + 'T00:00:00').toLocaleDateString('en-ZA', { day: 'numeric', month: 'short' }), cls: 'due-later' };
+  /* Within this calendar year the year is redundant; beyond it, leaving the year
+     off made 31 Dec 2026 and 31 Dec 9999 render identically. */
+  const d = new Date(iso + 'T00:00:00');
+  const sameYear = d.getFullYear() === NOW.getFullYear();
+  return {
+    text: d.toLocaleDateString('en-ZA', sameYear
+      ? { day: 'numeric', month: 'short' }
+      : { day: 'numeric', month: 'short', year: 'numeric' }),
+    cls: 'due-later',
+  };
+}
+function longDate(iso) {
+  const d = new Date(iso + 'T00:00:00');
+  return Number.isNaN(d.getTime()) ? 'an unknown date'
+    : d.toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
 /* Microsoft To Do's useful idea: group by when it matters, not by where it came from. */
@@ -61,13 +83,53 @@ const BUCKETS = [
 
 /* ---------------- the shared to-do store ---------------- */
 const KEY = 'v22-todos';
+
+/* The list is the one thing we persist, so a damaged value must never be able to
+   take the app down with it. A half-written value, a synced profile or anything
+   else that leaves malformed JSON in the key used to throw here, at the top level,
+   which meant nothing below this line was ever defined and the whole page rendered
+   blank with no way back short of clearing site data. We now recover to an empty
+   list and drop only the rows that are unusable. */
+/* Every task id must be unique, because the whole list addresses tasks by id: two
+   tasks sharing one id meant deleting either deleted both, and ticking the second
+   ticked the first. A counter makes a collision impossible rather than unlikely. */
+let taskSeq = 0;
+function newTaskId() { return 'todo-' + Date.now() + '-' + (++taskSeq); }
+
+function loadTasks() {
+  let raw;
+  try { raw = JSON.parse(localStorage.getItem(KEY) || '[]'); }
+  catch (e) { return []; }
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set();
+  return raw.filter(t => t && typeof t === 'object' && typeof t.id === 'string' && typeof t.text === 'string')
+    .map(t => ({
+      ...t,
+      /* Repair any duplicate ids already sitting in storage from the old id scheme,
+         so an existing list cannot keep cross-wiring after this fix ships. */
+      id: (() => { let id = t.id; while (seen.has(id)) id = newTaskId(); seen.add(id); return id; })(),
+      /* A due date we cannot read is worse than no due date: it used to leave the
+         task counted but in no bucket, so the list showed "1 open" above an empty
+         panel. An unreadable date becomes no date, and the task stays visible. */
+      due: (t.due && !isNaN(new Date(t.due).getTime())) ? t.due : null,
+      done: !!t.done,
+      archived: !!t.archived,
+      priority: Number.isFinite(t.priority) ? t.priority : 5,
+    }));
+}
+
 const Store = {
-  items: JSON.parse(localStorage.getItem(KEY) || '[]'),
-  save() { localStorage.setItem(KEY, JSON.stringify(this.items)); paintBadges(); },
+  items: loadTasks(),
+  /* A failed write must not take a working page down either. */
+  save() {
+    try { localStorage.setItem(KEY, JSON.stringify(this.items)); }
+    catch (e) { toast('Could not save your list. Your browser storage may be full.'); }
+    paintBadges();
+  },
   add(insight) {
     if (this.items.some(i => i.insightId === insight.id && !i.done && !i.archived)) return false;
     this.items.unshift({
-      id: 'todo-' + Date.now() + '-' + Math.round(performance.now()),
+      id: newTaskId(),
       insightId: insight.id,
       module: insight.module,
       text: insight.todo,
@@ -85,7 +147,7 @@ const Store = {
   },
   addManual(text) {
     if (!text.trim()) return;
-    this.items.unshift({ id: 'todo-' + Date.now(), module: null, text: text.trim(), due: null, done: false, archived: false,
+    this.items.unshift({ id: newTaskId(), module: null, text: text.trim(), due: null, done: false, archived: false,
       priority: 5, actionType: 'manual', added: new Date().toISOString(), manual: true });
     this.save();
   },
@@ -215,27 +277,76 @@ function paintNav() {
 function paintBadges() {
   paintNav();
   const open = Store.open().length;
+  /* The count is the open to-do count and nothing else. It used to read 8 + open,
+     where the 8 stood for notifications that do not exist. */
   const b = $('#bell-badge');
-  if (b) b.textContent = 8 + open;
+  if (b) { b.textContent = open; b.hidden = open === 0; }
 }
 
-/* ---------------- drawer + modal + toast ---------------- */
+/* ---------------- drawer + modal + toast ----------------
+   Both overlays are real dialogs: focus moves in when they open, Tab is kept
+   inside while they are open, and focus goes back to whatever opened them on
+   close. Previously they were only shown and hidden visually, so a keyboard user
+   could tab straight out of an open dialog into the page behind it, and a closed
+   drawer still held a reachable Close button on every page. */
+const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+let lastFocused = null;
+
+function focusables(root) {
+  return [...root.querySelectorAll(FOCUSABLE)].filter(el => el.offsetParent !== null || el === document.activeElement);
+}
+/* Keeps Tab and Shift+Tab inside the open dialog. */
+function trapTab(e, root) {
+  if (e.key !== 'Tab') return;
+  const f = focusables(root);
+  if (!f.length) return;
+  const first = f[0], last = f[f.length - 1];
+  if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+  else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+}
+function openOverlay(el, firstFocus) {
+  lastFocused = document.activeElement;
+  el.hidden = false;
+  el.removeAttribute('inert');
+  /* The page behind is made inert so AT cannot wander into it while a dialog
+     claims to be modal. */
+  $('#app-shell').setAttribute('inert', '');
+  requestAnimationFrame(() => (firstFocus || focusables(el)[0] || el).focus());
+}
+function closeOverlay(el) {
+  if (el.hidden) return;
+  el.setAttribute('inert', '');
+  $('#app-shell').removeAttribute('inert');
+  /* Kept out of the tab order and the accessibility tree until it is opened again. */
+  setTimeout(() => { if (el.getAttribute('inert') !== null) el.hidden = true; }, 300);
+  if (lastFocused && document.contains(lastFocused)) lastFocused.focus();
+  lastFocused = null;
+}
+
 function openDrawer(title, html) {
   $('#drawer-title').textContent = title;
   $('#drawer-bd').innerHTML = html;
   $('#drawer').classList.add('open');
   $('#scrim').classList.add('open');
+  openOverlay($('#drawer'), $('#drawer-x'));
 }
 function closeDrawer() {
   $('#drawer').classList.remove('open');
   $('#scrim').classList.remove('open');
+  closeOverlay($('#drawer'));
 }
 function openModal(title, html) {
   $('#modal-title').textContent = title;
   $('#modal-bd').innerHTML = html;
   $('#modal-wrap').classList.add('on');
+  openOverlay($('#modal-wrap'), $('#modal-x'));
 }
-function closeModal() { $('#modal-wrap').classList.remove('on'); }
+function closeModal() {
+  $('#modal-wrap').classList.remove('on');
+  closeOverlay($('#modal-wrap'));
+}
+function anyOverlayOpen() { return !$('#drawer').hidden || !$('#modal-wrap').hidden; }
+
 function toast(msg) {
   const t = $('#toast');
   t.textContent = msg;
@@ -856,8 +967,11 @@ function viewTodo() {
         <input id="td-q" placeholder="Search your tasks" aria-label="Search tasks" value="${esc(tv.q)}">
         ${tv.q ? `<button class="td-q-x" id="td-q-x" aria-label="Clear search">✕</button>` : ''}
       </div>
-      <div class="td-tabs" role="tablist">
-        ${statusTabs.map(([id, label, n]) => `<button class="td-tab ${tv.status === id ? 'on' : ''}" data-status="${id}" role="tab">${label} <span>${n}</span></button>`).join('')}
+      <!-- Plain buttons with a pressed state. These were marked up as an ARIA tab
+           widget without aria-selected, aria-controls or any tabpanel, which
+           stripped the native button semantics and replaced them with nothing. -->
+      <div class="td-tabs" role="group" aria-label="Filter tasks by status">
+        ${statusTabs.map(([id, label, n]) => `<button class="td-tab ${tv.status === id ? 'on' : ''}" data-status="${id}" aria-pressed="${tv.status === id ? 'true' : 'false'}">${label} <span>${n}</span></button>`).join('')}
       </div>
       <div class="td-selects">
         <label class="td-sel">Module
@@ -925,33 +1039,37 @@ function todoRow(t) {
   const mod = MODULES.find(m => m.id === t.module);
   const due = dueLabel(t.due);
   const pr = prMeta(t.priority);
+  /* The id lands inside eight HTML attributes below, so it needs escaping exactly
+     as much as the text does. It used to go in raw, which let a crafted id close
+     the attribute and add its own event handler. */
+  const id = esc(t.id);
   const modTag = mod
-    ? `<a class="td-mod" href="#/${t.module}" title="Open ${esc(mod.label)}">${esc(mod.label)} ↗</a>`
+    ? `<a class="td-mod" href="#/${esc(t.module)}" title="Open ${esc(mod.label)}">${esc(mod.label)} ↗</a>`
     : `<span class="td-mod td-mod-own">Added by you</span>`;
   const stamp = t.archived
     ? `<span class="td-stamp">Dismissed ${fmtStamp(t.archivedAt)}</span>`
     : t.done && t.doneAt ? `<span class="td-stamp">Done ${fmtStamp(t.doneAt)}</span>` : '';
 
   const controls = t.archived
-    ? `<button class="td-btn" data-restore="${t.id}" aria-label="Restore">↩ Restore</button>
-       <button class="td-x" data-del="${t.id}" aria-label="Delete permanently">✕</button>`
+    ? `<button class="td-btn" data-restore="${id}" aria-label="Restore">↩ Restore</button>
+       <button class="td-x" data-del="${id}" aria-label="Delete permanently">✕</button>`
     : `<label class="td-due ${due.cls}">
          <span>${due.text}</span>
-         <input type="date" value="${t.due || ''}" data-due="${t.id}" aria-label="Due date">
+         <input type="date" value="${esc(t.due || '')}" data-due="${id}" aria-label="Due date">
        </label>
-       <button class="td-icon" data-edit="${t.id}" aria-label="Edit task" title="Edit">✎</button>
-       <button class="td-icon" data-arch="${t.id}" aria-label="Dismiss task" title="Dismiss">🗙</button>
-       <button class="td-x" data-del="${t.id}" aria-label="Delete task" title="Delete">✕</button>`;
+       <button class="td-icon" data-edit="${id}" aria-label="Edit task" title="Edit">✎</button>
+       <button class="td-icon" data-arch="${id}" aria-label="Dismiss task" title="Dismiss">🗙</button>
+       <button class="td-x" data-del="${id}" aria-label="Delete task" title="Delete">✕</button>`;
 
   const check = t.archived
     ? `<span class="td-check td-check-off" aria-hidden="true"></span>`
-    : `<button class="td-check" data-toggle="${t.id}" aria-label="${t.done ? 'Mark as not done' : 'Mark as done'}">${t.done ? '✓' : ''}</button>`;
+    : `<button class="td-check" data-toggle="${id}" aria-pressed="${t.done ? 'true' : 'false'}" aria-label="${t.done ? 'Mark as not done' : 'Mark as done'}">${t.done ? '✓' : ''}</button>`;
   return `
     <div class="td ${t.done ? 'td-done' : ''} ${t.archived ? 'td-arch' : ''}">
       ${check}
-      <span class="td-pr ${pr.cls}" title="${pr.label}" aria-label="${pr.label}"></span>
+      <span class="td-pr ${pr.cls}" title="${pr.label}" role="img" aria-label="${pr.label}"></span>
       <div class="td-main">
-        <p class="td-text" data-text="${t.id}">${esc(t.text)}</p>
+        <p class="td-text" data-text="${id}">${esc(t.text)}</p>
         <p class="td-why">
           ${modTag}
           ${t.why ? esc(t.why) : ''}
@@ -975,7 +1093,9 @@ function wireTodo(root) {
 /* Inline edit: swap the task text for an input, commit on Enter or blur, cancel
    on Escape. Nothing leaves the page; the outcome is immediate. */
 function startEditTask(root, id) {
-  const p = root.querySelector(`[data-text="${id}"]`);
+  /* Match on the decoded attribute value rather than building a selector string,
+     so an id containing a quote cannot produce an invalid selector. */
+  const p = [...root.querySelectorAll('[data-text]')].find(el => el.dataset.text === id);
   if (!p || p.querySelector('input')) return;
   const current = Store.items.find(x => x.id === id);
   const val = current ? current.text : p.textContent;
@@ -1067,8 +1187,17 @@ MODULE_CHROME.debt = () => {
             <div><span>Minimum</span><strong>${money(x.minPayment)}</strong></div>
             <div><span>You pay</span><strong>${money(x.actualPayment)}</strong></div>
           </div>
-          ${REVOLVING.includes(x.kind) && x.actualPayment <= x.minPayment
-            ? '<p class="debt-c-note">You are paying the minimum only, so the balance barely moves.</p>' : ''}
+          ${(() => {
+            /* "Barely moves" was wrong for every debt on this page: at these rates
+               the interest is larger than the payment, so the balance climbs. Say
+               which of the two is actually happening. */
+            const monthlyInterest = x.balance * (x.apr / 100) / 12;
+            if (x.actualPayment > 0 && monthlyInterest >= x.actualPayment) {
+              return `<p class="debt-c-note debt-c-warn">Interest is ${money(monthlyInterest)} a month and you pay ${money(x.actualPayment)}, so this balance is growing by about ${money(monthlyInterest - x.actualPayment)} a month.</p>`;
+            }
+            return REVOLVING.includes(x.kind) && x.actualPayment <= x.minPayment
+              ? '<p class="debt-c-note">You are paying the minimum only, so the balance moves down slowly.</p>' : '';
+          })()}
           ${x.missedPayments ? `<p class="debt-c-note debt-c-warn">${x.missedPayments} missed payment on record.</p>` : ''}
         </div>`).join('')}
     </div>`;
@@ -1542,7 +1671,11 @@ function render() {
      over a page you navigated to. */
   if (!navFromAction) { closeDrawer(); closeModal(); }
   navFromAction = false;
-  const r = ROUTES[hash] || ROUTES['#/insights'];
+  /* An unknown hash used to render Insights while leaving the bogus URL in the
+     address bar, so no sidebar item matched it and the nav highlight went blank.
+     Correct the URL instead, which re-enters here through hashchange. */
+  if (!ROUTES[hash]) { location.replace('#/insights'); return; }
+  const r = ROUTES[hash];
   $('#crumb-leaf').textContent = r.leaf;
   r.view();
   paintBadges();
@@ -1555,7 +1688,13 @@ $('#scrim').onclick = () => { closeDrawer(); closeModal(); };
 $('#modal-x').onclick = closeModal;
 $('#modal-wrap').onclick = e => { if (e.target === $('#modal-wrap')) closeModal(); };
 $('#tara-fab').onclick = openTara;
-document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeDrawer(); closeModal(); } });
+document.addEventListener('keydown', e => {
+  /* Escape only acts when something is actually open, and Tab is held inside the
+     open dialog rather than escaping into the page behind it. */
+  if (!anyOverlayOpen()) return;
+  if (e.key === 'Escape') { closeDrawer(); closeModal(); return; }
+  trapTab(e, $('#drawer').hidden ? $('#modal-wrap') : $('#drawer'));
+});
 
 refresh();
 render();

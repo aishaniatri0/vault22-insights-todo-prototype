@@ -21,9 +21,61 @@
    situation is not in the data, the card does not appear.
    ============================================================ */
 
-const R = n => 'R' + Math.round(Math.abs(n)).toLocaleString('en-ZA');
-const daysBetween = (a, b) => Math.round((b - a) / 86400000);
+/* A figure we cannot compute must never reach the customer as "RNaN" or
+   "Infinity%". R() refuses to render a number that is not finite, and the callers
+   below check before they build a sentence around one. */
+const R = n => Number.isFinite(n) ? 'R' + Math.round(Math.abs(n)).toLocaleString('en-ZA') : 'an amount we cannot read yet';
+const isNum = n => Number.isFinite(n);
+/* Returns null rather than NaN/Infinity when the share cannot be expressed. */
+const pctOf = (part, whole) => (isNum(part) && isNum(whole) && whole !== 0)
+  ? Math.round((part / whole) * 100) : null;
+
+/* Dates arrive as bare 'YYYY-MM-DD', which Date parses as UTC midnight, while
+   d.today is a local-midnight Date. Differencing the two directly drifts by a day
+   east of Greenwich, which flips insights that sit on a 30 or 90 day threshold.
+   Compare calendar days in local terms instead. app.js fixes this for its own
+   date helpers; the engine needs the same treatment. */
+const _localMidnight = v => {
+  const d = v instanceof Date ? v : new Date(String(v).length <= 10 ? String(v) + 'T00:00:00' : v);
+  return Number.isNaN(d.getTime()) ? null : new Date(d.getFullYear(), d.getMonth(), d.getDate());
+};
+const daysBetween = (a, b) => {
+  const x = _localMidnight(a), y = _localMidnight(b);
+  if (!x || !y) return NaN;
+  return Math.round((y - x) / 86400000);
+};
 const ord = n => { const s = ['th','st','nd','rd'], v = n % 100; return n + (s[(v-20)%10] || s[v] || s[0]); };
+
+/* Real amortisation, replacing balance-divided-by-payment. Interest compounds
+   monthly at apr/12 and the payment is applied after it. Returns null when the
+   payment cannot cover the interest, because in that case the balance grows and
+   there is no payoff date to quote: the old maths returned a comfortable-looking
+   number of years for debts that in fact never clear.
+
+   Returns { months, totalInterest } or null. */
+function amortise(balance, apr, payment, capMonths = 1200) {
+  if (!isNum(balance) || !isNum(apr) || !isNum(payment)) return null;
+  if (balance <= 0) return { months: 0, totalInterest: 0 };
+  if (payment <= 0) return null;
+  const r = (apr / 100) / 12;
+  if (balance * r >= payment) return null; // interest outruns the payment
+  let bal = balance, interest = 0, m = 0;
+  while (bal > 0 && m < capMonths) {
+    const i = bal * r;
+    interest += i;
+    bal = bal + i - payment;
+    m++;
+  }
+  return bal > 0 ? null : { months: m, totalInterest: interest };
+}
+
+/* The month a given number of months from d.today, e.g. "December 2039". Derived
+   from the app's own today rather than a hardcoded July 2026 base. */
+function monthsFrom(today, months) {
+  if (!isNum(months)) return null;
+  const d = new Date(today.getFullYear(), today.getMonth() + months, 1);
+  return d.toLocaleDateString('en-ZA', { month: 'long', year: 'numeric' });
+}
 
 const INSIGHTS = [
 
@@ -67,15 +119,45 @@ const INSIGHTS = [
   {
     id: 'debt-3', dueInDays: 21, priority: 5, module: 'debt', status: 'live', action: 'todo',
     what: 'When you will be debt-free.',
-    reads: 'Your balances and repayments.',
+    reads: 'Your balances, rates and repayments.',
     test: d => {
+      if (!d.debts.length) return null; // debt-free: there is nothing to say
       const totalDebt = d.debts.reduce((s, x) => s + x.balance, 0);
       const totalPay = d.debts.reduce((s, x) => s + x.actualPayment, 0);
-      const months = Math.ceil(totalDebt / totalPay);
+
+      /* Each debt is amortised at its own rate against its own payment. Dividing
+         the total by the total ignores interest entirely, and at these rates that
+         is not a rounding difference: it turns debts that never clear into a
+         confident date. */
+      const runs = d.debts.map(x => ({ x, run: amortise(x.balance, x.apr, x.actualPayment) }));
+      const growing = runs.filter(r => !r.run).map(r => r.x);
+
+      if (growing.length) {
+        /* At least one debt is going backwards, so there is no debt-free date to
+           give. Say what is actually happening instead of inventing one. */
+        const worst = growing.slice().sort((a, b) =>
+          (b.balance * b.apr / 1200 - b.actualPayment) - (a.balance * a.apr / 1200 - a.actualPayment))[0];
+        const growth = worst.balance * (worst.apr / 100) / 12 - worst.actualPayment;
+        const all = growing.length === d.debts.length;
+        return {
+          title: all
+            ? 'At these repayments, your debt is growing, not clearing'
+            : `${growing.length} of your debts are growing, not clearing`,
+          body: `Interest is running faster than what you pay. ${worst.name} costs ${R(worst.balance * (worst.apr / 100) / 12)} a month in interest and you pay ${R(worst.actualPayment)}, so it rises by about ${R(growth)} a month. There is no payoff date until the payment covers the interest.`,
+          evidence: `${R(totalDebt)} owed across ${d.debts.length} debts, ${R(totalPay)} a month going out. ${growing.length === 1 ? 'One debt' : growing.length + ' debts'} where the monthly interest is more than the monthly payment: ${growing.map(g => `${g.name} (${g.apr}%, pays ${R(g.actualPayment)}, interest ${R(g.balance * (g.apr / 100) / 12)})`).join('; ')}.`,
+          inApp: 'Shows what payment each debt needs before it starts to fall.',
+          todo: 'Raise your repayment above the monthly interest on each debt.',
+        };
+      }
+
+      /* Every debt clears. The debt-free month is the longest single run. */
+      const months = Math.max(...runs.map(r => r.run.months));
+      const when = monthsFrom(d.today, months);
+      const interest = runs.reduce((s, r) => s + r.run.totalInterest, 0);
       return {
         title: `You are ${months} months from debt-free`,
-        body: `At your current repayments you clear ${R(totalDebt)} by around ${new Date(2026, 6 + months).toLocaleDateString('en-ZA', { month: 'long', year: 'numeric' })}. Paying more each month brings that forward.`,
-        evidence: `${R(totalDebt)} owed across ${d.debts.length} debts, ${R(totalPay)} a month going out.`,
+        body: `At your current repayments you clear ${R(totalDebt)}${when ? ` by around ${when}` : ''}, paying about ${R(interest)} in interest along the way. Paying more each month brings that forward.`,
+        evidence: `${R(totalDebt)} owed across ${d.debts.length} debts, ${R(totalPay)} a month going out. Each debt run forward at its own rate; the last to clear takes ${months} months.`,
         inApp: 'Sets a faster target in the plan.',
         todo: 'Increase your monthly repayment.',
       };
@@ -112,11 +194,31 @@ const INSIGHTS = [
       const mins = d.debts.filter(x => x.statementMinOnly && x.actualPayment <= x.minPayment);
       if (!mins.length) return null;
       const x = mins[0];
-      const yearsAtMin = Math.round((x.balance / (x.minPayment * 12)) * (1 + x.apr / 100));
+      const monthlyInterest = x.balance * (x.apr / 100) / 12;
+      const run = amortise(x.balance, x.apr, x.actualPayment);
+
+      /* The old figure was balance / (payment x 12), scaled by the rate. On this
+         card that returned "about 17 years" for a balance where the interest is
+         more than three times the payment, so it never clears at all. When the
+         payment cannot cover the interest we now say so, and say what payment
+         would actually start bringing the balance down. */
+      if (!run) {
+        const growth = monthlyInterest - x.actualPayment;
+        return {
+          title: `The minimum on ${x.name} does not cover the interest`,
+          body: `Paying ${R(x.actualPayment)} against ${R(monthlyInterest)} of monthly interest means the balance grows by about ${R(growth)} every month, not down. Anything above ${R(monthlyInterest)} a month starts to clear it.`,
+          evidence: `Minimum ${R(x.minPayment)}, you are paying ${R(x.actualPayment)}, balance ${R(x.balance)} at ${x.apr}%. Monthly interest ${R(monthlyInterest)}.`,
+          inApp: 'Shows what payment turns the balance around.',
+          todo: `Raise your payment on ${x.name} above ${R(monthlyInterest)} a month.`,
+          dedupeKey: `pay-down-${x.id}`,
+        };
+      }
+
+      const years = Math.round(run.months / 12);
       return {
         title: `You are only paying the minimum on ${x.name}`,
-        body: `Minimum payments barely cover the interest. At this rate it takes about ${yearsAtMin} years to clear.`,
-        evidence: `Minimum ${R(x.minPayment)}, you are paying ${R(x.actualPayment)}, balance ${R(x.balance)} at ${x.apr}%.`,
+        body: `Minimum payments barely cover the interest. At this rate it takes about ${years === 0 ? 'under a year' : years + ' year' + (years === 1 ? '' : 's')} to clear, and costs ${R(run.totalInterest)} in interest.`,
+        evidence: `Minimum ${R(x.minPayment)}, you are paying ${R(x.actualPayment)}, balance ${R(x.balance)} at ${x.apr}%. Monthly interest ${R(monthlyInterest)}; run forward, it clears in ${run.months} months.`,
         inApp: 'Shows a payoff plan.',
         todo: `Pay more than the minimum on ${x.name} this month.`,
         dedupeKey: `pay-down-${x.id}`,
@@ -427,11 +529,23 @@ const INSIGHTS = [
     test: d => {
       const c = d.profile.netWorthChange;
       if (!c || !c.total) return null;
-      const pct = Math.round((c.fromInvestments / c.total) * 100);
+      const p = d.profile;
+      const pct = pctOf(c.fromInvestments, c.total);
+      /* Only the accounts that actually hold a positive balance contribute to the
+         asset side, so quoting the full account count overstates the working. */
+      const contributing = d.accounts.filter(a => a.balance > 0).length;
+      /* The estimated home is more than half the asset side, so it is named as an
+         estimate every time this number is shown, and the linked-accounts-only
+         figure is given alongside it rather than left for someone to work out. */
+      const homeNote = p.propertyEstimated
+        ? `an estimated ${R(p.propertyValue)} home you told us about, which we cannot verify`
+        : `a ${R(p.propertyValue)} home`;
       return {
         title: `Your net worth is up ${R(c.total)} this month`,
-        body: `${pct}% of that came from your investments moving, not from money you put away. Markets give it and markets take it back.`,
-        evidence: `Net worth ${R(d.profile.netWorth)}: ${R(d.profile.assets)} in assets (${d.accounts.length} accounts and a ${R(d.profile.propertyValue)} home) less ${R(d.profile.liabilities)} owed. Up ${R(c.total)} this month: ${R(c.fromInvestments)} from investments, ${R(c.fromSaving)} from saving.`,
+        body: pct != null
+          ? `${pct}% of that came from your investments moving, the rest from money you put away. Markets give it and markets take it back.`
+          : 'Some came from your investments moving and some from money you put away.',
+        evidence: `Net worth ${R(p.netWorth)}: ${R(p.assets)} in assets (${contributing} linked accounts worth ${R(p.linkedAssets)}, plus ${homeNote}) less ${R(p.liabilities)} owed. On linked accounts alone, without the estimated home, it is ${R(p.netWorthLinked)}. Up ${R(c.total)} this month: ${R(c.fromInvestments)} from investments, ${R(c.fromSaving)} from saving.`,
         inApp: 'Shows what caused the change, and lets you set a goal.',
         todo: null,
       };
@@ -635,8 +749,10 @@ const INSIGHTS = [
     reads: 'Your income against what you save.',
     test: d => {
       const saved = d.budget.filter(c => c.type === 'Savings & Investments').reduce((s, c) => s + c.spent, 0);
-      const rate = Math.round((saved / d.income.expected) * 100);
-      if (rate >= 15) return null;
+      /* With no income on file there is no savings rate to state. Dividing anyway
+         put "You are saving NaN% of what you earn" on screen. */
+      const rate = pctOf(saved, d.income.expected);
+      if (rate == null || rate >= 15) return null;
       return {
         title: `You are saving ${rate}% of what you earn`,
         body: 'Below 15% and the score will not move, whatever else you do.',
@@ -652,8 +768,9 @@ const INSIGHTS = [
     reads: 'Your repayments against your income.',
     test: d => {
       const pay = d.debts.reduce((s, x) => s + x.actualPayment, 0);
-      const ratio = Math.round((pay / d.income.expected) * 100);
-      if (ratio < 36) return null;
+      /* No income on file gave "Infinity% of your income goes to debt". */
+      const ratio = pctOf(pay, d.income.expected);
+      if (ratio == null || ratio < 36) return null;
       return {
         title: `${ratio}% of your income goes to debt`,
         body: `Anything above 36% is where lenders start saying no. Moving money from Wants to debt is the fastest way down.`,

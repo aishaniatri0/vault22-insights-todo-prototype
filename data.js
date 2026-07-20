@@ -47,7 +47,11 @@ const ACCOUNTS = [
   { id: 'a3', name: 'Standard Bank Savings', type: 'Savings', balance: 412000, interestRate: 0.4, monthlyFee: 0, lastUpdated: '2026-07-13', active: true },
   { id: 'a4', name: 'Absa Money Market', type: 'Savings', balance: 571979, interestRate: 7.1, monthlyFee: 0, lastUpdated: '2026-07-14', active: true },
   { id: 'a5', name: 'Nedbank Cheque (old)', type: 'Bank', balance: 302, monthlyFee: 99, lastUpdated: '2026-01-08', active: false },
-  { id: 'a6', name: 'Discovery Card', type: 'Credit', balance: -84300, lastUpdated: '2026-05-02', active: true, stale: true },
+  /* The same card as debt d1, seen from the account side. It carries debtId so the
+     net worth maths can count the R84,300 once: it used to appear here AND in
+     DEBTS under a different name, which put the balance into liabilities twice and
+     left the Debt page and the net worth card disagreeing by exactly that amount. */
+  { id: 'a6', name: 'Capitec Credit Card', type: 'Credit', balance: -84300, debtId: 'd1', lastUpdated: '2026-05-02', active: true, stale: true },
   { id: 'a7', name: 'Vault22 Wallet', type: 'Investment', balance: 119402, lastUpdated: '2026-07-14', active: true },
 ];
 
@@ -129,7 +133,11 @@ const FITNESS = { score: 660, max: 1000, level: 'Expert', peerAverage: 705, weak
 
 /* ---------------- investments ----------------------------------------------------- */
 const INVESTMENTS = {
-  totalValue: 119402, invested: 113759, profit: 5643, monthlyContribution: 0,
+  /* profit is inception-to-date (totalValue less invested). monthProfit is what the
+     book actually moved THIS month, and it is the only one of the two that may be
+     described as a monthly change. They were previously conflated, which reported
+     lifetime profit as "up this month". */
+  totalValue: 119402, invested: 113759, profit: 5643, monthProfit: 1240, monthlyContribution: 0,
   holdings: [
     { name: 'Conservative Portfolio', value: 101955, fee: 1.75, target: 60 },
     { name: 'Global Balanced Fund of Funds', value: 4844, fee: 0.85, target: 40 },
@@ -162,23 +170,49 @@ const MARKETPLACE = {
 };
 
 /* Net worth is DERIVED, not asserted. A hardcoded R35m against seven accounts
-   that sum to R1.2m is the kind of impossible number the engine exists to
-   avoid. The home loan implies a home, so the asset side carries a property
-   valued above the bond. Everything nets out to a figure the numbers support. */
-const PROPERTY_VALUE = 1850000; // the home the R1,047,000 bond is against
-const _assets = ACCOUNTS.reduce((s, a) => s + Math.max(0, a.balance), 0) + PROPERTY_VALUE;
-const _liabilities = ACCOUNTS.reduce((s, a) => s + Math.max(0, -a.balance), 0)
-  + DEBTS.reduce((s, x) => s + x.balance, 0);
-const NET_WORTH = _assets - _liabilities;
+   that sum to R1.2m is the kind of impossible number the engine exists to avoid.
 
-/* The monthly change is tied to what actually moved: the investment book made
-   INVESTMENTS.profit, and new saving went in on top. fromInvestments can never
-   exceed the size of the investment book. */
-const NET_WORTH_CHANGE = { total: INVESTMENTS.profit + 3000, fromInvestments: INVESTMENTS.profit, fromSaving: 3000 };
+   One number here is NOT derived, and the app now says so wherever it appears.
+   The home loan implies a home, but no linked account can tell us what that home
+   is worth, so PROPERTY_VALUE is the customer's own estimate. It is far too big
+   to bury: it is more than half the asset side, and without it this customer's
+   linked accounts alone come to a NEGATIVE net worth. Presenting it as fact would
+   be exactly the thing this engine exists to refuse, so it is carried as an
+   estimate, labelled as one, and the linked-accounts-only figure is carried
+   alongside it so the two can always be compared. */
+const PROPERTY_VALUE = 1850000; // customer estimate for the home the R1,047,000 bond is against
+const PROPERTY_ESTIMATED = true;
+
+/* A credit account that mirrors a debt row (a6 <-> d1) must not be counted on both
+   sides. DEBTS is the authority for what is owed; linked accounts are the view. */
+const _linkedAccountLiabilities = ACCOUNTS.filter(a => !a.debtId)
+  .reduce((s, a) => s + Math.max(0, -a.balance), 0);
+
+const _linkedAssets = ACCOUNTS.reduce((s, a) => s + Math.max(0, a.balance), 0);
+const _assets = _linkedAssets + PROPERTY_VALUE;
+const _liabilities = _linkedAccountLiabilities + DEBTS.reduce((s, x) => s + x.balance, 0);
+const NET_WORTH = _assets - _liabilities;
+/* What the linked accounts alone support, with nothing estimated. */
+const NET_WORTH_LINKED = _linkedAssets - _liabilities;
+
+/* The monthly change is tied to what actually moved. INVESTMENTS.profit is
+   inception-to-date, not a monthly delta, so it cannot be presented as "this
+   month": the month's movement is the investment book's move for the month plus
+   what was actually saved into a savings account this month. */
+const _savedThisMonth = TX
+  .filter(t => t.category === 'Other Savings' || t.category === 'Emergency Fund')
+  .reduce((s, t) => s + Math.abs(Math.min(0, t.amount)), 0);
+const NET_WORTH_CHANGE = {
+  total: INVESTMENTS.monthProfit + _savedThisMonth,
+  fromInvestments: INVESTMENTS.monthProfit,
+  fromSaving: _savedThisMonth,
+};
 
 const DATA = {
   today: TODAY, groups: GROUPS, nws: NWS, classify,
-  profile: { name: 'ngandev0309', netWorth: NET_WORTH, propertyValue: PROPERTY_VALUE,
+  profile: { name: 'ngandev0309', netWorth: NET_WORTH, netWorthLinked: NET_WORTH_LINKED,
+    propertyValue: PROPERTY_VALUE, propertyEstimated: PROPERTY_ESTIMATED,
+    linkedAssets: _linkedAssets,
     assets: _assets, liabilities: _liabilities, profileComplete: 97,
     netWorthChange: NET_WORTH_CHANGE },
   accounts: ACCOUNTS, debts: DEBTS, budget: BUDGET, income: INCOME, tx: TX,
