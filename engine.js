@@ -25,6 +25,13 @@
    "Infinity%". R() refuses to render a number that is not finite, and the callers
    below check before they build a sentence around one. */
 const R = n => Number.isFinite(n) ? 'R' + Math.round(Math.abs(n)).toLocaleString('en-ZA') : 'an amount we cannot read yet';
+/* R() drops the sign, which is right for amounts where the direction is already
+   in the sentence ("R84 300 owed"). It is wrong for any figure that can legitimately
+   be negative: a net worth of minus R265 259 printed as "R265 259" tells the
+   customer the opposite of the truth. Signed figures must use Rs(). */
+const Rs = n => Number.isFinite(n)
+  ? (n < 0 ? '-R' + Math.round(Math.abs(n)).toLocaleString('en-ZA') : 'R' + Math.round(n).toLocaleString('en-ZA'))
+  : 'an amount we cannot read yet';
 const isNum = n => Number.isFinite(n);
 /* Returns null rather than NaN/Infinity when the share cannot be expressed. */
 const pctOf = (part, whole) => (isNum(part) && isNum(whole) && whole !== 0)
@@ -545,7 +552,7 @@ const INSIGHTS = [
         body: pct != null
           ? `${pct}% of that came from your investments moving, the rest from money you put away. Markets give it and markets take it back.`
           : 'Some came from your investments moving and some from money you put away.',
-        evidence: `Net worth ${R(p.netWorth)}: ${R(p.assets)} in assets (${contributing} linked accounts worth ${R(p.linkedAssets)}, plus ${homeNote}) less ${R(p.liabilities)} owed. On linked accounts alone, without the estimated home, it is ${R(p.netWorthLinked)}. Up ${R(c.total)} this month: ${R(c.fromInvestments)} from investments, ${R(c.fromSaving)} from saving.`,
+        evidence: `Net worth ${Rs(p.netWorth)}: ${R(p.assets)} in assets (${contributing} linked accounts worth ${R(p.linkedAssets)}, plus ${homeNote}) less ${R(p.liabilities)} owed. On linked accounts alone, without the estimated home, it is ${Rs(p.netWorthLinked)}. Up ${R(c.total)} this month: ${R(c.fromInvestments)} from investments, ${R(c.fromSaving)} from saving.`,
         inApp: 'Shows what caused the change, and lets you set a goal.',
         todo: null,
       };
@@ -624,9 +631,13 @@ const INSIGHTS = [
       const typical = spends[Math.floor(spends.length / 2)];
       return {
         title: 'One payment does not look like you',
-        body: `A merchant you have never paid before, for far more than you usually spend. If you recognise it, label it and we will leave you alone. If you do not, your bank needs to hear from you today.`,
+        /* The copy used to say "if you recognise it, label it and we will leave
+           you alone". There is nowhere to label a transaction, so it pointed at a
+           control that does not exist. It now asks only for what the customer can
+           actually act on: recognise it, or call the bank. */
+        body: `A merchant you have never paid before, for far more than you usually spend. If you recognise it, there is nothing to do. If you do not, your bank needs to hear from you today.`,
         evidence: `${odd.merchant}, ${R(odd.amount)} on ${odd.date}. First time at this merchant. Your typical payment is about ${R(typical)}.`,
-        inApp: 'Confirm it, or label it.',
+        inApp: 'Flags the payment so Tara stops asking about it.',
         todo: 'Contact your bank if you do not recognise this payment.',
       };
     },

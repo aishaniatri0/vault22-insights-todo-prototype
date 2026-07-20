@@ -164,11 +164,37 @@ const Store = {
 };
 
 /* ---------------- state ---------------- */
-/* "Not now" means not now, so a dismissal lasts for this session only and is
-   deliberately NOT persisted. Reloading brings the card back. This keeps the
-   word honest and stops a demo from permanently losing its insights. The
-   to-do list, which a person expects to persist, still does. */
-const State = { insights: [], filter: 'all', dismissed: [], txFilter: null, mktCat: null,
+/* "Not now" is remembered. It used to last for the session only, so a customer
+   would dismiss a card, reload, and find everything they had rejected sitting
+   there again. Since the to-do list persists, forgetting the dismissals read as
+   the app ignoring them rather than as a deliberate choice.
+
+   "Not now" is not "never", so a dismissal lapses after seven days and the card
+   comes back. That keeps the word honest without losing the customer's answer
+   the moment they refresh. */
+const DKEY = 'v22-dismissed';
+const DISMISS_DAYS = 7;
+function loadDismissed() {
+  let raw;
+  try { raw = JSON.parse(localStorage.getItem(DKEY) || '{}'); }
+  catch (e) { return {}; }
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  const out = {}, now = Date.now();
+  Object.keys(raw).forEach(id => {
+    const at = Number(raw[id]);
+    if (Number.isFinite(at) && (now - at) < DISMISS_DAYS * 86400000) out[id] = at;
+  });
+  return out;
+}
+function saveDismissed() {
+  try { localStorage.setItem(DKEY, JSON.stringify(State.dismissed)); } catch (e) { /* not fatal */ }
+}
+/* Record a dismissal, with the time it happened so it can lapse. */
+function dismissInsight(id) { State.dismissed[id] = Date.now(); saveDismissed(); }
+function isDismissed(id) { return Object.prototype.hasOwnProperty.call(State.dismissed, id); }
+
+const State = { insights: [], filter: 'all', dismissed: loadDismissed(), txFilter: null, mktCat: null,
+  restOpen: false,
   todoView: { q: '', status: 'all', module: 'all', sort: 'due' } };
 
 /* Priority on a task is inherited from the insight that created it (1 = most
@@ -222,10 +248,10 @@ const MODULE_CHROME = {};
 const MODULE_WIRE = {};
 
 function refresh() {
-  State.insights = runEngine(DATA).filter(i => !State.dismissed.includes(i.id));
+  State.insights = runEngine(DATA).filter(i => !isDismissed(i.id));
 }
 function dismiss(id) {
-  State.dismissed.push(id);
+  dismissInsight(id);
   refresh(); render();
 }
 
@@ -357,22 +383,30 @@ function toast(msg) {
 
 /* ---------------- insight card ---------------- */
 function statusChip(i) {
-  if (i.status === 'blocked') return `<span class="chip chip-blocked" title="${(i.blockedBy || '').replace(/"/g, "'")}">Needs rails</span>`;
+  /* "Needs rails" is how we talk about this internally. A customer has no idea
+     what a rail is, so the chip says what it means for them: the insight is real
+     but Tara cannot act on it yet. */
+  /* The tooltip used the raw internal note, so hovering the chip showed the
+     customer things like "Stephen: we do not have enough loan suppliers yet".
+     It goes through the same cleaning as the dialog. */
+  if (i.status === 'blocked') return `<span class="chip chip-blocked" title="${esc(customerBlockedReason(i.blockedBy)).replace(/"/g, "'")}">Not ready yet</span>`;
   if (i.status === 'moved') return `<span class="chip chip-moved">Moved from Budgeting</span>`;
   return '';
 }
 function actionChip(i) {
   if (i.precursor) return `<span class="chip chip-ask">You answer</span>`;
   if (i.action === 'todo') return `<span class="chip chip-todo">To-do</span>`;
-  if (i.action === 'wizard') return `<span class="chip chip-wizard">Wizard</span>`;
+  if (i.action === 'wizard') return `<span class="chip chip-wizard">Guided setup</span>`;
   return `<span class="chip chip-inapp">Tara does it</span>`;
 }
 
 /* The blockedBy note is written for us, with names in it ("Stephen: ..."). It is
    never shown to a customer with the attribution attached. Strip the leading
-   "Name:" so the reason stands on its own. */
+   "Name:" so the reason stands on its own, and restore the capital the stripped
+   name was carrying, so the sentence does not start lowercase. */
 function customerBlockedReason(s) {
-  return String(s || '').replace(/^\s*[A-Z][a-z]+(?:\s[A-Z][a-z]+)?:\s*/, '');
+  const out = String(s || '').replace(/^\s*[A-Z][a-z]+(?:\s[A-Z][a-z]+)?:\s*/, '').trim();
+  return out ? out.charAt(0).toUpperCase() + out.slice(1) : out;
 }
 
 /* Confidence is derived, never invented. A card that reads a real balance,
@@ -389,14 +423,23 @@ function confidenceOf(i) {
     why: 'This is read straight from your accounts, so it reflects your real balances and transactions.' };
 }
 
-/* The recommended action in plain words, and whether it happens in Vault22 or
-   off platform. Off-platform actions become a to-do; in-app actions Tara runs. */
+/* The recommended action in plain words, and who does it. The tag used to read
+   "Off platform" / "In Vault22", which is how we describe it to each other, not
+   how a customer thinks about it. A customer wants to know one thing: is this
+   mine to do, or does Tara handle it. */
 function recommendedAction(i) {
-  if (i.status === 'blocked') return { where: 'Not yet', text: 'Shaped and visible, but it will not act until the rails behind it are real.' };
-  if (i.precursor) return { where: 'In Vault22', text: 'Answer two quick questions so Tara can look at your cover.' };
-  if (i.action === 'todo') return { where: 'Off platform', text: i.todo || 'Adds a task to your to-do list to do yourself.' };
-  if (i.action === 'wizard') return { where: 'In Vault22', text: (i.cta || 'Open the guided setup') + ', a guided setup inside the app.' };
-  return { where: 'In Vault22', text: (i.inApp || i.cta || 'Tara does this for you') + '.' };
+  if (i.status === 'blocked') return { where: 'Not yet', text: 'Tara can see this, but she cannot act on it until we finish building the part behind it.' };
+  if (i.precursor) return { where: 'Tara does this', text: 'Answer two quick questions so Tara can look at your cover.' };
+  if (i.action === 'todo') return { where: 'You do this', text: i.todo || 'Adds a task to your to-do list to do yourself.' };
+  if (i.action === 'wizard') return { where: 'Tara does this', text: (i.cta || 'Open the guided setup') + ', a guided setup inside the app.' };
+  /* Several of these strings already end in a full stop, so appending one gave
+     "Set a goal.." on about half the drawers. */
+  return { where: 'Tara does this', text: endStop(i.inApp || i.cta || 'Tara does this for you') };
+}
+/* Ends a sentence exactly once. */
+function endStop(s) {
+  const t = String(s || '').trim();
+  return !t || /[.!?]$/.test(t) ? t : t + '.';
 }
 
 /* The full insight, opened as a drawer: what it is, why Tara raised it, the data
@@ -418,25 +461,24 @@ function openInsightDetail(i) {
     : `<button class="btn btn-primary btn-block" data-dtodo="${i.id}">Add to my to-do list</button>`;
   else actionBtn = `<button class="btn btn-primary btn-block" data-dinapp="${i.id}">${esc(i.cta || 'Let Tara do it')}</button>`;
 
-  openDrawer('Insight', `
-    <div class="dr-tags">${actionChipHtml(i)} ${statusChipHtml(i)} <span class="conf ${conf.cls}">${conf.label}</span></div>
+  /* The drawer is titled with the module it came from, so a customer opening it
+     from a list of many knows where they are. It used to say only "Insight".
+     The old "Why Tara raised this" block was removed: it read "Tara read X and
+     found something worth your attention", which restates the section below it
+     and tells the customer nothing they did not already know. What they actually
+     want at that point is the data, so the data now leads. */
+  openDrawer(mod ? mod.label : 'Insight', `
+    <div class="dr-tags">${actionChipHtml(i)} ${statusChipHtml(i)}</div>
     <p class="dr-lead">${esc(i.title)}</p>
     <p class="dr-para">${esc(i.body)}</p>
     <div class="dr-block">
-      <h4>Why Tara raised this</h4>
-      <p>Tara read ${esc((i.reads || '').replace(/\.$/, '').toLowerCase())} and found something worth your attention.</p>
-    </div>
-    <div class="dr-block">
-      <h4>The data behind it</h4>
+      <h4>What Tara read</h4>
       <p>${esc(i.evidence)}</p>
-    </div>
-    <div class="dr-block">
-      <h4>Confidence</h4>
-      <p><span class="conf ${conf.cls}">${conf.label}</span> ${esc(conf.why)}</p>
+      <p class="dr-conf"><span class="conf ${conf.cls}">${conf.label}</span> ${esc(conf.why)}</p>
     </div>
     <div class="dr-block">
       <h4>Recommended action</h4>
-      <p><span class="where-tag where-${rec.where === 'Off platform' ? 'off' : 'in'}">${rec.where}</span> ${esc(rec.text)}</p>
+      <p><span class="where-tag where-${rec.where === 'You do this' ? 'off' : 'in'}">${rec.where}</span> ${esc(rec.text)}</p>
     </div>
     ${actionBtn}
     ${mod ? `<a class="dr-golink" href="#/${i.module}">Open ${esc(mod.label)} ↗</a>` : ''}
@@ -521,7 +563,7 @@ function openBlockedDrawer(i) {
   openDrawer('Why this is blocked', `
     <p class="dr-lead">${esc(i.title)}</p>
     <div class="dr-block">
-      <h4>What it needs before it can ship</h4>
+      <h4>What Tara is waiting for</h4>
       <p>${esc(customerBlockedReason(i.blockedBy))}</p>
     </div>
     <div class="dr-block">
@@ -532,7 +574,7 @@ function openBlockedDrawer(i) {
       <h4>What it found in your data</h4>
       <p>${esc(i.evidence)}</p>
     </div>
-    <p class="dr-note">We are showing this card so the shape is reviewable, but it will not act until the rails behind it are real.</p>`);
+    <p class="dr-note">Tara is showing you this so you know she can see it. She will not act on it until the part behind it is built.</p>`);
 }
 
 /* The insurance precursor. Stephen: ask before you advise. Answering it unlocks
@@ -761,13 +803,15 @@ function openTara() {
       <img src="assets/img/tara-advisor.png" alt="">
       <div>
         <strong>Tara</strong>
-        <span>Your financial advisor</span>
+        <span>Your money assistant</span>
       </div>
     </div>
     <p class="dr-lead">I have read your ${DATA.accounts.length} accounts, ${DATA.tx.length} transactions this month, ${DATA.debts.length} debts and ${DATA.insurance.policies.length} policies.</p>
     <div class="dr-block">
       <h4>What I found</h4>
-      <p>${all.length} things worth your attention. ${needYou} need you to do something off platform, so they belong on your to-do list. ${taraCan} I can handle here${blocked ? `, and ${blocked} are still waiting on rails we do not have yet` : ''}.</p>
+      <!-- Tara used to tell the customer that things were "waiting on rails we do
+           not have yet", which is our language, not theirs. -->
+      <p>${all.length} things worth your attention. ${needYou} ${needYou === 1 ? 'is' : 'are'} yours to do, so ${needYou === 1 ? 'it belongs' : 'they belong'} on your to-do list. ${taraCan} I can handle here${blocked ? `, and ${blocked} I can see but cannot act on yet, because we are still building the part behind ${blocked === 1 ? 'it' : 'them'}` : ''}.</p>
     </div>
     <div class="dr-block">
       <h4>Your list</h4>
@@ -797,14 +841,20 @@ function viewInsights() {
      blocked, so it has a real Add button). taraCan = on-platform AND not blocked.
      blocked = shaped but not actionable. needYou + taraCan + blocked = total. */
   const total = State.insights.length;
-  const needYou = live.filter(i => i.action === 'todo').length;
+  /* Anything already on the to-do list is no longer waiting for the customer, so
+     it stops counting towards "need you". The count used to ignore the list
+     entirely and sat at the same number however many you dealt with. */
+  const needYou = live.filter(i => i.action === 'todo' && !Store.hasFor(i.id)).length;
   const taraCan = live.filter(i => i.action !== 'todo').length;
+  const onList = Store.open().length;
 
   v.innerHTML = `
     <div class="page-head">
       <h1>Insights</h1>
     </div>
-    <p class="page-sub">${total} insights from your real data. ${needYou} need you, ${taraCan} Tara can handle, ${blocked.length} waiting on rails.</p>
+    <p class="page-sub">Tara read your accounts and found ${total} things worth a look. ${needYou === 0
+      ? 'You have picked up everything that needs you.'
+      : `${needYou} ${needYou === 1 ? 'needs' : 'need'} you, ${taraCan} Tara can handle for you.`}</p>
 
     <section class="best">
       <div class="best-hd">
@@ -818,32 +868,26 @@ function viewInsights() {
       <div class="best-grid" id="best-grid"></div>
     </section>
 
-    <h3 class="sect-h">Everything else</h3>
+    <!-- The rest stays folded away by default. Leading with three and then
+         printing all 44 underneath undid the point of leading with three: the
+         page ran to seventeen phone screens and the ranking stopped meaning
+         anything. Opening this is now a deliberate act. -->
+    <details class="ins-rest" id="ins-rest" ${State.restOpen ? 'open' : ''}>
+      <summary class="sect-h sect-h-toggle">
+        <span>Everything else</span>
+        <span class="sect-sub">${rest.length} more${onList ? `, ${onList} already on your list` : ''}</span>
+      </summary>
 
-    <div class="ins-summary">
-      <div class="sum">
-        <span class="sum-n">${needYou}</span>
-        <span class="sum-l">need you<em>they go to your to-do list</em></span>
+      <div class="filters" id="filters">
+        <button class="f ${State.filter === 'all' ? 'on' : ''}" data-f="all">All ${total}</button>
+        <button class="f ${State.filter === 'todo' ? 'on' : ''}" data-f="todo">Needs you</button>
+        <button class="f ${State.filter === 'tara' ? 'on' : ''}" data-f="tara">Tara does it</button>
+        ${MODULES.filter(m => State.insights.some(i => i.module === m.id))
+          .map(m => `<button class="f ${State.filter === m.id ? 'on' : ''}" data-f="${esc(m.id)}">${esc(m.label)}</button>`).join('')}
       </div>
-      <div class="sum">
-        <span class="sum-n">${taraCan}</span>
-        <span class="sum-l">Tara can do<em>handled on platform</em></span>
-      </div>
-      <div class="sum">
-        <span class="sum-n">${Store.open().length}</span>
-        <span class="sum-l">on your list<em><a href="#/todo">open the list</a></em></span>
-      </div>
-    </div>
 
-    <div class="filters" id="filters">
-      <button class="f ${State.filter === 'all' ? 'on' : ''}" data-f="all">All ${total}</button>
-      <button class="f ${State.filter === 'todo' ? 'on' : ''}" data-f="todo">To-do</button>
-      <button class="f ${State.filter === 'tara' ? 'on' : ''}" data-f="tara">Tara does it</button>
-      ${MODULES.filter(m => State.insights.some(i => i.module === m.id))
-        .map(m => `<button class="f ${State.filter === m.id ? 'on' : ''}" data-f="${esc(m.id)}">${esc(m.label)}</button>`).join('')}
-    </div>
-
-    <div class="ins-grid" id="grid"></div>`;
+      <div class="ins-grid" id="grid"></div>
+    </details>`;
 
   const bestGrid = $('#best-grid');
   if (best.length) {
@@ -865,6 +909,10 @@ function viewInsights() {
     wireCards(grid);
   }
   $('#filters').querySelectorAll('.f').forEach(b => b.onclick = () => { State.filter = b.dataset.f; render(); });
+  /* Remember whether the customer had the rest open, so acting on a card does not
+     fold the section back up under them. */
+  const restEl = $('#ins-rest');
+  if (restEl) restEl.addEventListener('toggle', () => { State.restOpen = restEl.open; });
 }
 
 /* Sort a task set by the chosen key. Due sorts undated last; Priority sorts the
@@ -909,7 +957,7 @@ function viewTodo() {
     ['all', 'All open', counts.open],
     ['overdue', 'Overdue', overdue.length],
     ['done', 'Done', counts.done],
-    ['archived', 'Archived', counts.archived],
+    ['archived', 'Dismissed', counts.archived],
   ];
 
   const listHtml = (() => {
@@ -942,9 +990,22 @@ function viewTodo() {
     // Filtered / status view: a single flat, sorted list.
     const rows = sortTasks(setFor, tv.sort);
     if (!rows.length) {
-      return `<div class="empty empty-slim"><div class="empty-ic">🔍</div><h3>No tasks match</h3>
-        <p>${isFiltering ? 'Try a different filter or search.' : 'Nothing here yet.'}</p>
-        <button class="btn btn-ghost" id="td-clear">Clear filters</button></div>`;
+      /* An empty Overdue list is good news, and an empty Dismissed list is not a
+         mistyped filter. All three used to show the same "No tasks match / Try a
+         different filter", which told someone with nothing overdue that they had
+         searched wrong. */
+      const emptyFor = () => {
+        if (q) return { ic: '🔍', h: 'No tasks match that search', p: `Nothing on your list mentions "${esc(q)}".` };
+        if (tv.status === 'overdue') return { ic: '✓', h: 'Nothing is overdue', p: 'Everything on your list is still within its date.' };
+        if (tv.status === 'done') return { ic: '○', h: 'Nothing finished yet', p: 'Tick something off and it will show up here.' };
+        if (tv.status === 'archived') return { ic: '○', h: 'Nothing dismissed', p: 'Tasks you dismiss are kept here so you can restore them.' };
+        if (tv.module !== 'all') return { ic: '🔍', h: 'Nothing from that part of the app', p: 'Try a different module, or clear the filter.' };
+        return { ic: '🔍', h: 'No tasks match', p: 'Nothing here yet.' };
+      };
+      const e = emptyFor();
+      return `<div class="empty empty-slim"><div class="empty-ic">${e.ic}</div><h3>${e.h}</h3>
+        <p>${e.p}</p>
+        ${isFiltering ? '<button class="btn btn-ghost" id="td-clear">Clear filters</button>' : ''}</div>`;
     }
     return `<div>${rows.map(todoRow).join('')}</div>`;
   })();
@@ -1051,15 +1112,28 @@ function todoRow(t) {
     : t.done && t.doneAt ? `<span class="td-stamp">Done ${fmtStamp(t.doneAt)}</span>` : '';
 
   const controls = t.archived
-    ? `<button class="td-btn" data-restore="${id}" aria-label="Restore">↩ Restore</button>
+    ? `<button class="td-btn" data-restore="${id}" aria-label="Restore task">Restore</button>
        <button class="td-x" data-del="${id}" aria-label="Delete permanently">✕</button>`
-    : `<label class="td-due ${due.cls}">
-         <span>${due.text}</span>
+    : `<label class="td-due ${t.done ? 'due-none' : due.cls}">
+         <!-- Once a task is done its deadline is history, so a finished task no
+              longer shows an amber "Tomorrow" pill next to "Done". -->
+         <span>${t.done ? 'Set date' : due.text}</span>
          <input type="date" value="${esc(t.due || '')}" data-due="${id}" aria-label="Due date">
        </label>
-       <button class="td-icon" data-edit="${id}" aria-label="Edit task" title="Edit">✎</button>
-       <button class="td-icon" data-arch="${id}" aria-label="Dismiss task" title="Dismiss">🗙</button>
-       <button class="td-x" data-del="${id}" aria-label="Delete task" title="Delete">✕</button>`;
+       <!-- SVGs, not emoji. The dismiss control used to be 🗙, which has no glyph
+            in the UI font and rendered as a grey striped box that read as a menu
+            icon. Dismiss and delete also both showed as plain grey crosses, so
+            the recoverable action and the permanent one looked identical; delete
+            is now a bin and is styled as destructive. -->
+       <button class="td-icon" data-edit="${id}" aria-label="Edit task" title="Edit">
+         <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z"/></svg>
+       </button>
+       <button class="td-icon" data-arch="${id}" aria-label="Dismiss task" title="Dismiss, you can restore it later">
+         <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/></svg>
+       </button>
+       <button class="td-icon td-icon-danger" data-del="${id}" aria-label="Delete task permanently" title="Delete for good">
+         <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/></svg>
+       </button>`;
 
   const check = t.archived
     ? `<span class="td-check td-check-off" aria-hidden="true"></span>`
@@ -1083,7 +1157,23 @@ function todoRow(t) {
 
 function wireTodo(root) {
   root.querySelectorAll('[data-toggle]').forEach(b => b.onclick = () => { Store.toggle(b.dataset.toggle); render(); });
-  root.querySelectorAll('[data-del]').forEach(b => b.onclick = () => { Store.remove(b.dataset.del); toast('Task deleted'); render(); });
+  /* Deleting is the only action here that cannot be undone, and it used to happen
+     on a single click of an icon that looked much like the one beside it. It now
+     asks first, and the confirm names the task so you can see what you are about
+     to lose. Dismiss stays one click, because it is recoverable. */
+  root.querySelectorAll('[data-del]').forEach(b => b.onclick = () => {
+    const id = b.dataset.del;
+    const t = Store.items.find(x => x.id === id);
+    openModal('Delete this task?', `
+      <p class="dr-para">"${esc(t ? t.text : 'This task')}" will be removed for good. You cannot undo this.</p>
+      <p class="dr-note">If you only want it out of the way, dismiss it instead. Dismissed tasks can be restored.</p>
+      <div class="modal-acts">
+        <button class="btn btn-ghost" id="del-cancel">Keep it</button>
+        <button class="btn btn-danger" id="del-yes">Delete for good</button>
+      </div>`);
+    $('#del-cancel').onclick = closeModal;
+    $('#del-yes').onclick = () => { Store.remove(id); closeModal(); toast('Task deleted'); render(); };
+  });
   root.querySelectorAll('[data-arch]').forEach(b => b.onclick = () => { Store.archive(b.dataset.arch); toast('Task dismissed. Find it under Dismissed.'); render(); });
   root.querySelectorAll('[data-restore]').forEach(b => b.onclick = () => { Store.restore(b.dataset.restore); toast('Task restored'); render(); });
   root.querySelectorAll('[data-due]').forEach(inp => inp.onchange = () => { Store.setDue(inp.dataset.due, inp.value); render(); });
@@ -1252,7 +1342,7 @@ function goalFlow(i, preset) {
       const targetDate = $('#g-date').value || '';
       if (!name || target <= 0) { toast('Give the goal a name and a target'); return false; }
       DATA.goals.push({ id: 'g' + (DATA.goals.length + 1), name, target, saved: 0, pct: 0, monthly, targetDate });
-      State.dismissed.push(i.id);
+      dismissInsight(i.id);
       toast(`Goal "${name}" created`);
     },
   });
@@ -1263,7 +1353,7 @@ function goalFlow(i, preset) {
 function infoDrawer(i, title, inner, next) {
   go('#/' + i.module);
   openDrawer(title, `${inner}${next ? `<button class="btn btn-primary btn-block" id="dr-next">${next.label}</button>` : ''}
-    <p class="dr-note">Tara does this on platform. Nothing goes on your to-do list.</p>`);
+    <p class="dr-note">Tara does this for you. Nothing goes on your to-do list.</p>`);
   if (next) $('#dr-next').onclick = () => { closeDrawer(); next.run(); };
 }
 
@@ -1368,7 +1458,7 @@ function runInApp(i) {
       go('#/' + i.module);
       const idle = DATA.accounts.filter(a => a.type === 'Savings' && a.interestRate < 1 && a.balance > 50000)[0];
       const better = DATA.marketplace.betterSavingsRate;
-      if (!idle) { toast('That cash has already been moved'); State.dismissed.push(i.id); refresh(); return render(); }
+      if (!idle) { toast('That cash has already been moved'); dismissInsight(i.id); refresh(); return render(); }
       return taraModal({
         title: 'Move your cash to a better rate',
         body: `<p class="wz-lead">${esc(idle.name)} pays ${idle.interestRate}%. ${esc(better.name)} pays ${better.rate}%. Move it across and it earns more from day one.</p>
@@ -1413,7 +1503,7 @@ function runInApp(i) {
         body: `<p class="wz-lead">${esc(o.member)} spent ${money(o.thisMonth)} this month against a ${money(o.average)} average. A conversation is better than a limit, but you can set one.</p>
                <label class="tf"><span>Monthly limit</span><input class="input" id="lm-amt" type="number" value="${o.average}"></label>`,
         confirmLabel: 'Set the limit',
-        onConfirm: () => { o.limit = Math.round(+$('#lm-amt').value || 0); State.dismissed.push(i.id); toast(`Limit of ${money(o.limit)} set for ${o.member}`); },
+        onConfirm: () => { o.limit = Math.round(+$('#lm-amt').value || 0); dismissInsight(i.id); toast(`Limit of ${money(o.limit)} set for ${o.member}`); },
       });
     }
 
@@ -1425,7 +1515,7 @@ function runInApp(i) {
         body: `<p class="wz-lead">"${esc(g.name)}" is at ${g.pct}%. Add a bit to move it along.</p>
                <label class="tf"><span>Amount to add</span><input class="input" id="tu-amt" type="number" value="500"></label>`,
         confirmLabel: 'Top it up',
-        onConfirm: () => { g.pct = Math.min(100, g.pct + Math.round((+$('#tu-amt').value || 0) / 100)); State.dismissed.push(i.id); toast(`"${g.name}" is now at ${g.pct}%`); },
+        onConfirm: () => { g.pct = Math.min(100, g.pct + Math.round((+$('#tu-amt').value || 0) / 100)); dismissInsight(i.id); toast(`"${g.name}" is now at ${g.pct}%`); },
       });
     }
 
@@ -1453,7 +1543,7 @@ function runInApp(i) {
         title: `${esc(left.name)} has ${money(left.remaining)} left`,
         body: `<p class="wz-lead">Carry it into next month so the room is still there, or move it to a goal before the period closes.</p>`,
         confirmLabel: 'Carry it into next month',
-        onConfirm: () => { const c = DATA.budget.find(x => x.id === left.id); if (c) c.rollover = true; State.dismissed.push(i.id); toast(`${left.name} will carry ${money(left.remaining)} forward`); },
+        onConfirm: () => { const c = DATA.budget.find(x => x.id === left.id); if (c) c.rollover = true; dismissInsight(i.id); toast(`${left.name} will carry ${money(left.remaining)} forward`); },
       });
     }
 
@@ -1463,7 +1553,7 @@ function runInApp(i) {
       const wants = DATA.budget.filter(c => c.type === 'Want');
       const trimmable = wants.filter(c => c.spent > c.average).sort((a, b) => (b.spent - b.average) - (a.spent - a.average))[0];
       const trim = trimmable ? Math.round(trimmable.spent - trimmable.average) : 0;
-      if (!stalled || !trimmable) { toast('Nothing to move right now'); State.dismissed.push(i.id); refresh(); return render(); }
+      if (!stalled || !trimmable) { toast('Nothing to move right now'); dismissInsight(i.id); refresh(); return render(); }
       return taraModal({
         title: `Fund "${esc(stalled.name)}"`,
         body: `<p class="wz-lead">Move ${money(trim)} a month from ${esc(trimmable.name)} into "${esc(stalled.name)}" and adjust the budget to match.</p>`,
@@ -1480,8 +1570,8 @@ function runInApp(i) {
     <p class="dr-lead">${esc(i.inApp)}</p>
     <div class="dr-block"><h4>What Tara read</h4><p>${esc(i.evidence)}</p></div>
     <button class="btn btn-primary btn-block" id="dr-do">${esc(i.cta || 'Do it')}</button>
-    <p class="dr-note">Tara does this on platform. Nothing goes on your to-do list.</p>`);
-  $('#dr-do').onclick = () => { closeDrawer(); State.dismissed.push(i.id); refresh(); render(); toast('Done. Tara handled it.'); };
+    <p class="dr-note">Tara does this for you. Nothing goes on your to-do list.</p>`);
+  $('#dr-do').onclick = () => { closeDrawer(); dismissInsight(i.id); refresh(); render(); toast('Done. Tara handled it.'); };
 }
 
 /* ---- module surfaces rebuilt to match the live Vault22 app (reference/shots),

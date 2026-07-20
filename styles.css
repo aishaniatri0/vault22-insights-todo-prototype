@@ -1262,3 +1262,97 @@ a.td-mod:hover { background: var(--green); color: #fff; }
 /* The badge is display:flex, which beats the hidden attribute's UA display:none.
    Without this the "0" bubble stayed on screen when there was nothing to show. */
 .bell .badge[hidden] { display: none; }
+
+/* ============================================================
+   Insights and To-Do: layout fixes from the walkthrough
+   ============================================================ */
+
+/* The "+1" overflow marker beside the region flags, as the live app has it. */
+.flags-more { font-size: 11px; font-weight: 700; color: var(--g-500); margin-left: 2px; }
+
+/* "Everything else" is now a disclosure. Style the summary as the section
+   heading it replaced, and remove the default marker triangle. */
+.ins-rest { margin-top: 26px; }
+.ins-rest > summary {
+  display: flex; align-items: baseline; gap: 10px;
+  cursor: pointer; list-style: none; padding: 12px 0;
+  border-top: 1px solid var(--g-200);
+}
+.ins-rest > summary::-webkit-details-marker { display: none; }
+.ins-rest > summary::after {
+  content: '';
+  width: 8px; height: 8px; margin-left: auto; margin-right: 6px;
+  border-right: 2px solid var(--g-500); border-bottom: 2px solid var(--g-500);
+  transform: rotate(45deg); transition: transform .18s;
+}
+.ins-rest[open] > summary::after { transform: rotate(-135deg); }
+.sect-sub { font-size: 13px; font-weight: 500; color: var(--g-500); }
+
+/* Confidence now sits under the data it qualifies rather than in its own block. */
+.dr-conf { margin-top: 8px; font-size: 13px; color: var(--g-500); }
+
+/* Delete is destructive and must not look like the recoverable dismiss beside it. */
+.td-icon-danger { color: var(--g-400); }
+.td-icon-danger:hover { color: #B91C1C; background: #FEF2F2; }
+
+/* ---- Insight card actions ----
+   The three buttons were three different heights (52 / 38 / 54) so their pill
+   outlines did not line up, and the primary label broke mid-word as
+   "Add to my to-" / "do list". Equal height, no mid-word breaks. */
+.ins-cta { align-items: stretch; }
+.ins .btn {
+  min-height: 44px;
+  display: inline-flex; align-items: center; justify-content: center;
+  hyphens: none; overflow-wrap: normal; word-break: keep-all;
+}
+
+@media (max-width: 700px) {
+  /* Stacked full width on a phone: side by side there is not enough room for the
+     primary label to stay on one line. */
+  .ins .btn { width: 100%; min-height: 48px; }
+  .ins-cta { flex-direction: column; gap: 8px; align-items: stretch; }
+
+  /* The floating avatar sat on top of the "Not now" button of the first card in
+     the default viewport position, and won the tap. Tucked into the corner, and
+     the page carries enough bottom padding that it never covers the last card. */
+  /* Tucked fully outside the content column. The card buttons run full width to
+     within the page's 16px gutter, so the avatar has to clear that edge or it
+     sits on top of them and takes the tap. */
+  .tara-fab { right: 6px; bottom: 8px; width: 42px; height: 42px; }
+  .tara-fab img { width: 38px; height: 38px; }
+  main { padding-bottom: 84px; }
+
+  /* Comfortable thumb targets on the task row, with real separation between the
+     recoverable and the destructive control. */
+  .td-controls { gap: 6px; }
+  .td-check, .td-icon { min-width: 44px; min-height: 44px; }
+  .td-icon-danger { margin-left: 6px; }
+}
+
+/* The sidebar becomes a horizontal strip on a phone with roughly three of the
+   sixteen destinations visible and nothing to say the rest exist. A fade on the
+   right edge shows the strip continues. */
+@media (max-width: 900px) {
+  /* Positioned only so the fade below can anchor to it. `top` must be reset with
+     it: the desktop rule sets top:96px, which static ignores but relative honours,
+     and leaving it on pushed the whole strip down over the page heading. */
+  .side { position: relative; top: auto; }
+  .side::after {
+    content: ''; position: absolute; top: 0; right: 0; bottom: 0; width: 34px;
+    pointer-events: none; border-radius: 0 18px 18px 0;
+    background: linear-gradient(to right, rgba(255,255,255,0), rgba(255,255,255,.96));
+  }
+}
+
+/* Between phone and desktop the fixed sidebar ate a third of the width. Narrow
+   it so the content, which is the point of the page, keeps the room. */
+@media (min-width: 901px) and (max-width: 1100px) {
+  .side { width: 196px; }
+  .side .sub { display: none; }
+}
+
+/* Confirm dialog for the one destructive action on the list. */
+.modal-acts { display: flex; gap: 10px; justify-content: flex-end; margin-top: 18px; flex-wrap: wrap; }
+.modal-acts .btn { min-height: 44px; }
+.btn-danger { background: #B91C1C; color: #fff; border: 1px solid #B91C1C; }
+.btn-danger:hover { background: #991B1B; border-color: #991B1B; }
