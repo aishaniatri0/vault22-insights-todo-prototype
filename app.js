@@ -161,6 +161,17 @@ const Store = {
   doneItems() { return this.items.filter(i => i.done && !i.archived); },
   archivedItems() { return this.items.filter(i => i.archived); },
   hasFor(insightId) { return this.items.some(i => i.insightId === insightId && !i.done && !i.archived); },
+  /* When an insight is dismissed after it was added, the task it created is
+     dismissed with it, so the two do not disagree. It is archived rather than
+     deleted, so it lands under Dismissed on the To-Do page and can be restored.
+     Returns true if a task was actually taken off the open list. */
+  dismissFor(insightId) {
+    const t = this.items.find(i => i.insightId === insightId && !i.done && !i.archived);
+    if (!t) return false;
+    t.archived = true; t.archivedAt = new Date().toISOString();
+    this.save();
+    return true;
+  },
 };
 
 /* ---------------- state ---------------- */
@@ -251,8 +262,13 @@ function refresh() {
   State.insights = runEngine(DATA).filter(i => !isDismissed(i.id));
 }
 function dismiss(id) {
+  /* "Not now" on a card that is already on the to-do list takes the task off the
+     list too, so the count cannot sit at 1 for a card the customer just dismissed.
+     The task is recoverable under Dismissed. */
+  const removedTask = Store.dismissFor(id);
   dismissInsight(id);
   refresh(); render();
+  toast(removedTask ? 'Removed. Find it under Dismissed on your to-do list.' : 'Not now. Tara will bring it back later.');
 }
 
 /* ---------------- chrome: sidebar ---------------- */
@@ -1767,10 +1783,26 @@ function render() {
   if (!ROUTES[hash]) { location.replace('#/insights'); return; }
   const r = ROUTES[hash];
   $('#crumb-leaf').textContent = r.leaf;
+  /* render() rebuilds the whole view, which also runs for in-place updates like
+     adding a to-do or dismissing a card. Those must not move the customer: the
+     page used to jump to the top every time they acted on a card. On a real page
+     change we go to the top; on an in-place update we hold the scroll position,
+     captured here because replacing the view's innerHTML otherwise loses it. */
+  const isNav = hash !== lastRenderedHash;
+  const keepY = isNav ? 0 : window.scrollY;
+  /* Replacing the view's contents leaves the page briefly shorter than it was, so
+     restoring the scroll position gets clamped to the smaller height and the
+     customer is thrown up the page. Hold the container at its current height
+     across the swap so the page never collapses, restore, then release it. */
+  const view = $('#view');
+  if (!isNav) view.style.minHeight = view.offsetHeight + 'px';
   r.view();
   paintBadges();
-  window.scrollTo(0, 0);
+  window.scrollTo(0, keepY);
+  if (!isNav) requestAnimationFrame(() => { window.scrollTo(0, keepY); view.style.minHeight = ''; });
+  lastRenderedHash = hash;
 }
+let lastRenderedHash = null;
 
 window.addEventListener('hashchange', render);
 $('#drawer-x').onclick = closeDrawer;
